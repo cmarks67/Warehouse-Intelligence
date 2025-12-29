@@ -1,0 +1,49 @@
+:root {
+
+    --wi-gap: 12px;
+  --wi-header-h: 60px;
+
+  --wi-sidebar-w-collapsed: 76px;
+
+
+  --wi-bg: #f3f4f6;
+  --wi-card: #ffffff;
+  --wi-border: #e5e7eb;
+
+  --wi-text-main: #111827;
+  --wi-text-muted: #6b7280;
+
+  --wi-primary: #2563eb;      /* blue accent */
+  --wi-primary-hover: #1d4ed8;
+
+  --wi-danger: #dc2626;
+
+  --wi-radius: 8px;
+
+  :root {
+  --wi-gap: 12px;
+  --wi-header-h: 60px;
+
+  /* Add: expanded sidebar width */
+  --wi-sidebar-w: 260px;
+  --wi-sidebar-w-collapsed: 76px;
+
+  --wi-bg: #f3f4f6;
+  --wi-card: #ffffff;
+  --wi-border: #e5e7eb;
+
+  --wi-text-main: #111827;
+  --wi-text-muted: #6b7280;
+
+  /* Add: alias for components that use --wi-text */
+  --wi-text: var(--wi-text-main);
+
+  --wi-primary: #2563eb;      /* blue accent */
+  --wi-primary-hover: #1d4ed8;
+
+  --wi-danger: #dc2626;
+
+  --wi-radius: 8px;
+}
+
+}

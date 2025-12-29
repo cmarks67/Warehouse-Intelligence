@@ -1,0 +1,34 @@
+.wi-main {
+  flex: 1;
+}
+
+.wi-layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  gap: 20px;
+}
+
+.wi-sidebar {
+  width: 240px;
+  background: var(--wi-card);
+  border-radius: 12px;
+  border: 1px solid var(--wi-border);
+  padding: 12px 10px;
+  height: fit-content;
+}
+
+.wi-content {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .wi-layout {
+    flex-direction: column;
+  }
+  .wi-sidebar {
+    width: 100%;
+  }
+}

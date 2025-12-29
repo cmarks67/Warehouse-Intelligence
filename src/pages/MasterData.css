@@ -1,0 +1,131 @@
+/* /src/pages/MasterData.css */
+/* Minimal CSS only; inherits global tokens/theme */
+
+.wi-md-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wi-md-status {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-main, #111827);
+  font-size: 0.9rem;
+}
+
+.wi-md-status--error {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(220, 38, 38, 0.08);
+  color: rgba(153, 27, 27, 1);
+}
+
+.wi-md-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .wi-md-two {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-md-cardlet {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--bg-card, #fff);
+}
+
+.wi-md-h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.wi-md-label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+  font-weight: 700;
+}
+
+.wi-md-input {
+  width: 100%;
+  height: 42px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  color: var(--text-main, #111827);
+  font-size: 0.95rem;
+}
+
+.wi-md-twoInner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 700px) {
+  .wi-md-twoInner {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-md-right {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wi-md-hr {
+  border: none;
+  border-top: 1px solid var(--border, #e5e7eb);
+  margin: 16px 0;
+}
+
+.wi-md-muted {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.9rem;
+}
+
+.wi-md-tableWrap {
+  overflow: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  margin-top: 8px;
+}
+
+.wi-md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.wi-md-table th,
+.wi-md-table td {
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.wi-md-table th {
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-muted, #6b7280);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wi-md-table .num {
+  text-align: right;
+  white-space: nowrap;
+}

@@ -1,0 +1,213 @@
+/* /src/pages/SchedulingTool.css
+   Minimal page-local CSS only.
+   No colours defined here; everything inherits global tokens.
+*/
+
+.wi-sched-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wi-sched-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.wi-sched-tab {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.wi-sched-tab--active {
+  border-color: var(--brand-primary, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+  font-weight: 700;
+}
+
+.wi-sched-status {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-main, #111827);
+  font-size: 0.9rem;
+}
+
+.wi-sched-status--error {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(220, 38, 38, 0.08);
+  color: rgba(153, 27, 27, 1);
+}
+
+.wi-sched-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .wi-sched-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .wi-sched-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-sched-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+  font-weight: 600;
+}
+
+.wi-sched-control,
+.wi-sched-cellInput {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--bg-card, #fff);
+  font-size: 0.95rem;
+  color: var(--text-main, #111827);
+  height: 42px;
+}
+
+.wi-sched-seg {
+  display: inline-flex;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-card, #fff);
+  height: 42px;
+  width: fit-content;
+}
+
+.wi-sched-segBtn {
+  border: none;
+  background: transparent;
+  padding: 0 14px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.wi-sched-segBtn + .wi-sched-segBtn {
+  border-left: 1px solid var(--border, #e5e7eb);
+}
+
+.wi-sched-segBtn--active {
+  background: rgba(37, 99, 235, 0.10);
+  color: var(--brand-primary-dark, #1e40af);
+  font-weight: 800;
+}
+
+.wi-sched-section {
+  margin-top: 12px;
+}
+
+.wi-sched-h3 {
+  margin: 10px 0 6px;
+  font-size: 0.95rem;
+}
+
+.wi-sched-h4 {
+  margin: 10px 0 8px;
+  font-size: 0.9rem;
+}
+
+.wi-sched-muted {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.9rem;
+}
+
+.wi-sched-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.wi-sched-kpi {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--bg-card, #fff);
+}
+
+.wi-sched-kpiK {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.85rem;
+}
+
+.wi-sched-kpiV {
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+.wi-sched-tableWrap {
+  overflow: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+}
+
+.wi-sched-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.wi-sched-table th,
+.wi-sched-table td {
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.wi-sched-table th {
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-muted, #6b7280);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wi-sched-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wi-sched-configGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+@media (max-width: 980px) {
+  .wi-sched-configGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-sched-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 0.5fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}

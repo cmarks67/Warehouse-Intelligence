@@ -1,0 +1,36 @@
+.wi-btn {
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--wi-radius);
+  border: 1px solid var(--wi-border);
+  background: var(--wi-card);
+  color: var(--wi-text-main);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wi-btn--primary {
+  background: var(--wi-primary);
+  border-color: var(--wi-primary);
+  color: #fff;
+}
+
+.wi-btn--primary:hover {
+  background: var(--wi-primary-hover);
+}
+
+.wi-btn--secondary{
+  background: #fff;
+  border-color: var(--wi-border);
+  color: var(--wi-text-main);
+}
+
+.wi-btn--secondary:hover{
+  background: #f9fafb;
+}
+
+
+.wi-btn--danger {
+  background: var(--wi-danger);
+  border-color: var(--wi-danger);
+  color: #fff;
+}

@@ -1,0 +1,44 @@
+.wi-card {
+  background: var(--wi-card);
+  border: 1px solid var(--wi-border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.04);
+}
+
+.wi-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wi-card__headings {
+  min-width: 0;
+}
+
+.wi-card__title {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--wi-text-main);
+}
+
+.wi-card__subtitle {
+  margin: 0;
+  color: var(--wi-text-muted);
+  font-size: 0.9rem;
+}
+
+.wi-card__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wi-card__body {
+  min-width: 0;
+}

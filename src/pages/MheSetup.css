@@ -1,0 +1,211 @@
+/* /src/pages/MheSetup.css */
+/* Minimal CSS only; inherits global tokens/theme */
+
+.wi-mhe-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wi-mhe-status {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-main, #111827);
+  font-size: 0.9rem;
+}
+
+.wi-mhe-status--error {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(220, 38, 38, 0.08);
+  color: rgba(153, 27, 27, 1);
+}
+
+.wi-mhe-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.wi-mhe-tab {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.wi-mhe-tab--active {
+  border-color: var(--brand-primary, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+  font-weight: 700;
+}
+
+.wi-mhe-section {
+  margin-top: 12px;
+}
+
+.wi-mhe-label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+  font-weight: 700;
+}
+
+.wi-mhe-control {
+  width: 100%;
+  height: 42px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  color: var(--text-main, #111827);
+  font-size: 0.95rem;
+}
+
+.wi-mhe-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .wi-mhe-grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-mhe-tableWrap {
+  overflow: auto;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  margin-top: 10px;
+}
+
+.wi-mhe-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.wi-mhe-table th,
+.wi-mhe-table td {
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wi-mhe-table th {
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-muted, #6b7280);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wi-mhe-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.wi-mhe-muted {
+  color: var(--text-muted, #6b7280);
+  font-size: 0.9rem;
+}
+
+.wi-mhe-actionBtns {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.wi-mhe-actionsRow {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wi-mhe-chip {
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-soft, #f9fafb);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.wi-mhe-hr {
+  border: none;
+  border-top: 1px solid var(--border, #e5e7eb);
+  margin: 16px 0;
+}
+
+.wi-mhe-h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.wi-mhe-checkRow {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.wi-mhe-check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-main, #111827);
+  font-size: 0.95rem;
+}
+
+/* Pills for due status (kept semantic, no brand override) */
+.wi-mhe-duePill {
+  display: inline-block;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  background: var(--bg-soft, #f9fafb);
+  color: var(--text-main, #111827);
+}
+
+.wi-mhe-duePill--soon {
+  border-color: rgba(234, 179, 8, 0.35);
+  background: rgba(234, 179, 8, 0.12);
+}
+
+.wi-mhe-duePill--over {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.wi-mhe-reasonPill {
+  display: inline-block;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  background: var(--bg-card, #fff);
+  color: var(--text-main, #111827);
+}
+
+/* Row emphasis */
+.wi-mhe-row--overdue {
+  background: rgba(220, 38, 38, 0.06);
+}
+.wi-mhe-row--soon {
+  background: rgba(234, 179, 8, 0.06);
+}

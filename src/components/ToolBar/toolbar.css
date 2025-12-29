@@ -1,0 +1,23 @@
+.wi-toolbar{
+  background: var(--wi-card);
+  border-bottom: 1px solid var(--wi-border);
+}
+
+.wi-toolbar__inner{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0.6rem 1rem;
+  display:flex;
+  justify-content: space-between;
+  gap: var(--wi-gap);
+}
+
+.wi-toolbar__left,
+.wi-toolbar__right{
+  display:flex;
+  gap: .5rem;
+  align-items:center;
+}
+.wi-topbar__inner { justify-content: space-between; }
+.wi-topbar__titles { flex: 1; margin-left: 1.25rem; }
+.wi-topbar__right { display: flex; justify-content: flex-end; }

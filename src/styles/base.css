@@ -1,0 +1,82 @@
+/* Box model reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Root / body */
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--wi-bg);
+  color: var(--wi-text-main);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings – neutral, not opinionated */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 700;
+  color: var(--wi-text-main);
+}
+
+/* Paragraphs */
+p {
+  margin: 0;
+}
+
+/* Links */
+a {
+  color: var(--wi-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Buttons (baseline – components can extend) */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+/* Form inputs – IMPORTANT for login consistency */
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--wi-text-main);
+  background: var(--wi-card);
+  border: 1px solid var(--wi-border);
+  border-radius: var(--wi-radius);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--wi-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--wi-primary) 35%, transparent);
+}
+
+/* Lists */
+ul, ol {
+  margin: 0;
+  padding: 0;
+}
+
+/* Utility */
+.hidden {
+  display: none !important;
+}

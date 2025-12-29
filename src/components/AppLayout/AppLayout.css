@@ -1,0 +1,150 @@
+:root {
+  --wi-red: #dc2626;
+  --wi-red-dark: #b91c1c;
+  --wi-bg: #f3f4f6;
+  --wi-card: #ffffff;
+  --wi-border: #e5e7eb;
+  --wi-text: #111827;
+  --wi-muted: #6b7280;
+}
+
+.wi-shell {
+  min-height: 100vh;
+  background: var(--wi-bg);
+  color: var(--wi-text);
+  font-family: system-ui, sans-serif;
+}
+
+.wi-header {
+  background: #fff;
+  border-bottom: 1px solid var(--wi-border);
+}
+
+.wi-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wi-brand {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+.wi-brand span {
+  color: #2563eb;
+}
+
+.wi-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wi-user-email {
+  font-size: 0.9rem;
+  color: var(--wi-muted);
+}
+
+.wi-btn {
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.wi-btn-outline {
+  border: 1px solid var(--wi-border);
+  background: #fff;
+}
+.wi-btn-outline:hover {
+  background: #f9fafb;
+}
+
+.wi-main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.wi-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.wi-sidebar {
+  width: 260px;
+  background: var(--wi-card);
+  border: 1px solid var(--wi-border);
+  border-radius: 12px;
+  padding: 12px 10px;
+}
+
+.wi-side-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--wi-muted);
+  margin: 6px 6px;
+}
+
+.wi-divider {
+  height: 1px;
+  background: var(--wi-border);
+  margin: 12px 0;
+}
+
+.wi-side-item,
+.wi-side-subitem,
+.wi-side-group-head {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--wi-text);
+}
+
+.wi-side-item:hover,
+.wi-side-subitem:hover,
+.wi-side-group-head:hover {
+  background: #f3f4f6;
+}
+
+.wi-side-subitem.active,
+.wi-side-item.active {
+  background: #e8f0ff;
+  font-weight: 600;
+}
+
+.wi-side-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wi-arrow {
+  font-size: 0.85rem;
+  color: var(--wi-muted);
+}
+
+.wi-side-group-body.hidden {
+  display: none;
+}
+
+.wi-content {
+  flex: 1;
+}
+
+@media (max-width: 900px) {
+  .wi-layout {
+    flex-direction: column;
+  }
+  .wi-sidebar {
+    width: 100%;
+  }
+}
