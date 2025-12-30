@@ -1,0 +1,261 @@
+/* /src/pages/MheTrainingSetup.css */
+
+.wi-mheTrainingPage {
+  max-width: 1650px;
+  margin: 0 auto;
+}
+
+/* Tabs (same pattern used elsewhere) */
+.wi-tabsRow {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 14px 0;
+  flex-wrap: wrap;
+}
+
+.wi-tabPill {
+  border: 1px solid var(--border, #e5e7eb);
+  background: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wi-tabPill.active {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: rgba(37, 99, 235, 0.55);
+}
+
+/* Layout */
+.wi-mheRegisterGrid,
+.wi-mheHistoryGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+/* Forms */
+.wi-formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.wi-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wi-span2 {
+  grid-column: span 2;
+}
+
+.wi-uploadRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Register list blocks */
+.wi-registerList {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wi-colleagueBlock {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.wi-colleagueBlock.is-dueSoon {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.wi-colleagueHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 10px 4px;
+  cursor: default;
+}
+
+.wi-colleagueName {
+  font-weight: 800;
+  font-size: 1.02rem;
+}
+
+.wi-colleagueMeta {
+  margin-left: 8px;
+  color: var(--text-muted, #6b7280);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.wi-colleagueBadges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wi-badge {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 800;
+  font-size: 0.8rem;
+  background: #fff;
+}
+
+.wi-badge--danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+/* Tables */
+.wi-tableWrap {
+  overflow: auto;
+  margin-top: 6px;
+  max-height: 520px;
+}
+
+.wi-tableWrap--tall {
+  max-height: 700px;
+}
+
+.wi-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wi-table th,
+.wi-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  vertical-align: top;
+}
+
+.wi-rowDueSoon td {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.wi-actionsRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wi-rowHistory {
+  opacity: 0.8;
+}
+
+.wi-cellNotes {
+  max-width: 420px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Floating tooltip */
+.wi-floatTip {
+  position: fixed;
+  z-index: 9999;
+  width: 420px;
+  max-width: 92vw;
+  padding: 12px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.wi-floatTip__title {
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.wi-floatTip__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wi-floatTip__row .t {
+  font-weight: 900;
+  margin-bottom: 2px;
+}
+
+.wi-floatTip__row .d {
+  color: var(--text-muted, #6b7280);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+/* Modal */
+.wi-modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.wi-modal {
+  width: 720px;
+  max-width: 96vw;
+  background: #fff;
+  border-radius: 18px;
+  border: 1px solid var(--border, #e5e7eb);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.wi-modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.wi-modalTitle {
+  font-weight: 900;
+}
+
+.wi-modalClose {
+  border: 1px solid var(--border, #e5e7eb);
+  background: #fff;
+  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.wi-modalBody {
+  padding: 12px 14px;
+}
+
+.wi-modalFooter {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border, #e5e7eb);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}

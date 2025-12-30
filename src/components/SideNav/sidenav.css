@@ -71,3 +71,82 @@
 .hidden {
   display: none;
 }
+/* Sidebar root: fixed width + consistent sizing */
+.wi-navRoot {
+  width: 260px;            /* expanded width */
+  min-width: 260px;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.wi-navRoot--collapsed {
+  width: 64px;             /* collapsed width */
+  min-width: 64px;
+  max-width: 64px;
+}
+
+/* Prevent content causing width jumps */
+.wi-nav__scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  padding-right: 4px; /* keeps scrollbar from shifting content */
+}
+
+/* Top bar controls */
+.wi-nav__topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px 10px;
+}
+
+.wi-nav__brand {
+  font-weight: 800;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wi-nav__controls {
+  display: flex;
+  gap: 8px;
+}
+
+.wi-nav__ctrlBtn {
+  border: 1px solid var(--border, #e5e7eb);
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wi-nav__ctrlBtn.is-active {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  border-color: rgba(37, 99, 235, 0.55);
+}
+
+/* Collapsed mode: hide labels but keep clickable area */
+.wi-nav__item.is-collapsed,
+.wi-nav__link.is-collapsed,
+.wi-nav__dropdownHeader.is-collapsed {
+  display: flex;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.wi-nav__sectionTitle.is-collapsed {
+  display: none;
+}
+
+/* Keep labels from wrapping and changing height */
+.wi-nav__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

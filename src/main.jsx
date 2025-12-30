@@ -13,14 +13,17 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { UsersPage } from "./pages/UsersPage";
 import { PasswordPage } from "./pages/PasswordPage";
 
+import ColleaguesSetup from "./pages/ColleaguesSetup";
+
 // Setup pages
 import MasterData from "./pages/MasterData";
 import MheSetup from "./pages/MheSetup";
+import MheTrainingSetup from "./pages/MheTrainingSetup";
 
-// NEW: Tools page
+// Tools
 import SchedulingTool from "./pages/SchedulingTool";
 
-// Styles (keep whatever you already had)
+// Styles
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./index.css";
@@ -41,8 +44,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
           <Route path="/setup/companies-sites" element={<Navigate to="/app/setup/companies-sites" replace />} />
           <Route path="/setup/mhe" element={<Navigate to="/app/setup/mhe" replace />} />
+          <Route path="/setup/colleagues" element={<Navigate to="/app/setup/colleagues" replace />} />
+          <Route path="/setup/mhe-training" element={<Navigate to="/app/setup/mhe-training" replace />} />
 
-          {/* NEW alias for tools */}
+          {/* Tools alias */}
           <Route path="/tools/scheduling" element={<Navigate to="/app/tools/scheduling" replace />} />
 
           {/* Protected app routes */}
@@ -82,6 +87,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/app/setup/mhe"
             element={
@@ -91,7 +97,25 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             }
           />
 
-          {/* NEW: Tools route */}
+          <Route
+            path="/app/setup/colleagues"
+            element={
+              <ProtectedRoute>
+                <ColleaguesSetup />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/app/setup/mhe-training"
+            element={
+              <ProtectedRoute>
+                <MheTrainingSetup />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Tools route */}
           <Route
             path="/app/tools/scheduling"
             element={

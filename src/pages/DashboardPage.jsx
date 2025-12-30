@@ -13,6 +13,8 @@ function activeFromPath(pathname) {
   if (pathname.startsWith("/app/tools/scheduling")) return "scheduling-tool";
   if (pathname.startsWith("/app/users")) return "users";
   if (pathname.startsWith("/app/password")) return "password";
+  if (pathname.startsWith("/app/setup/colleagues")) return "colleagues-setup";
+
   return "overview";
 }
 
@@ -34,6 +36,9 @@ function pathFromKey(key) {
       return "/app/password";
     default:
       return "/app/dashboard";
+      case "colleagues-setup":
+  return "/app/setup/colleagues";
+
   }
 }
 
