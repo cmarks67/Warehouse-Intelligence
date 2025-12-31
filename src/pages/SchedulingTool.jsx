@@ -6,7 +6,7 @@ import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabaseClient";
 
 import "./SchedulingTool.css";
 
@@ -17,19 +17,15 @@ import "./SchedulingTool.css";
  * - We avoid redefining colours/tokens here. All branding comes from global CSS.
  */
 
-// Supabase (if you already export supabase from ../lib/supabaseClient, import that instead)
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase =
-  SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
 function activeFromPath(pathname) {
   if (pathname.startsWith("/app/setup/companies-sites")) return "company-site-setup";
+  if (pathname.startsWith("/app/setup/mhe-training")) return "mhe-training";
   if (pathname.startsWith("/app/setup/mhe")) return "mhe-setup";
   if (pathname.startsWith("/app/connections")) return "connections";
   if (pathname.startsWith("/app/tools/scheduling")) return "scheduling-tool";
   if (pathname.startsWith("/app/users")) return "users";
   if (pathname.startsWith("/app/password")) return "password";
+  if (pathname.startsWith("/app/setup/colleagues")) return "colleagues-setup";
   return "overview";
 }
 
@@ -41,6 +37,8 @@ function pathFromKey(key) {
       return "/app/setup/companies-sites";
     case "mhe-setup":
       return "/app/setup/mhe";
+    case "mhe-training":
+      return "/app/setup/mhe-training";
     case "connections":
       return "/app/connections";
     case "scheduling-tool":
@@ -49,6 +47,8 @@ function pathFromKey(key) {
       return "/app/users";
     case "password":
       return "/app/password";
+    case "colleagues-setup":
+      return "/app/setup/colleagues";
     default:
       return "/app/dashboard";
   }
@@ -112,31 +112,26 @@ export default function SchedulingTool() {
   const navigate = useNavigate();
   const location = useLocation();
   const activeNav = useMemo(() => activeFromPath(location.pathname), [location.pathname]);
+  const onSelectNav = (key) => navigate(pathFromKey(key));
 
+  // Header email
   const [email, setEmail] = useState("");
 
-  const onSelectNav = (key) => {
-    navigate(pathFromKey(key));
-  };
-
-  // Header email (same as Dashboard)
-  useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ""));
-  }, []);
-
-  // Page state
+  // Status + tab
   const [tab, setTab] = useState("capability"); // capability | pva | config | daily
   const [status, setStatus] = useState({ text: "Ready.", isError: false });
 
-  // Context
+  // Tenant boundary + enforcement
+  const [accountId, setAccountId] = useState("");
+  const [allowedCompanies, setAllowedCompanies] = useState([]);
   const [companyId, setCompanyId] = useState("");
+
+  // Context
   const [siteId, setSiteId] = useState("");
   const [date, setDate] = useState(isoToday());
   const [shift, setShift] = useState("AM");
 
-  // DB dropdown data
-  const [companies, setCompanies] = useState([]);
+  // DB dropdown data (tenant-scoped)
   const [sites, setSites] = useState([]);
 
   // Local config/data
@@ -149,45 +144,124 @@ export default function SchedulingTool() {
   useEffect(() => saveJson(LS_CFG_TASKS, cfgTasks), [cfgTasks]);
   useEffect(() => saveJson(LS_DATA, dataStore), [dataStore]);
 
-  // Load companies
-  useEffect(() => {
-    (async () => {
-      if (!supabase) {
-        setStatus({
-          text: "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.",
-          isError: true,
-        });
-        return;
-      }
-      const { data, error } = await supabase.from("companies").select("id,name").order("name");
-      if (error) {
-        setStatus({ text: `Failed to load companies: ${error.message}`, isError: true });
-        return;
-      }
-      setCompanies(data || []);
-    })();
+  const resolveAccountId = useCallback(async (userId) => {
+    // Primary: public.users
+    {
+      const { data, error } = await supabase.from("users").select("account_id").eq("id", userId).maybeSingle();
+      if (!error && data?.account_id) return data.account_id;
+    }
+
+    // Fallback: public.company_users
+    {
+      const { data, error } = await supabase.from("company_users").select("account_id").eq("user_id", userId).limit(1).maybeSingle();
+      if (!error && data?.account_id) return data.account_id;
+    }
+
+    return "";
   }, []);
 
-  // Load sites for company
+  // Init session (email + account_id)
   useEffect(() => {
     (async () => {
-      setSites([]);
-      setSiteId("");
-      if (!supabase || !companyId) return;
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw authErr;
 
-      const { data, error } = await supabase
-        .from("sites")
-        .select("id,name")
-        .eq("company_id", companyId)
-        .order("name");
+        const user = authData?.user;
+        if (!user) {
+          navigate("/login", { replace: true });
+          return;
+        }
 
-      if (error) {
-        setStatus({ text: `Failed to load sites: ${error.message}`, isError: true });
-        return;
+        setEmail(user.email || "");
+
+        if (!accountId) {
+          const aId = await resolveAccountId(user.id);
+          if (!aId) {
+            setStatus({
+              text: "Could not resolve account_id for this user. Ensure users (or company_users) contains account_id.",
+              isError: true,
+            });
+            return;
+          }
+          setAccountId(aId);
+        }
+      } catch (e) {
+        setStatus({ text: e?.message || "Failed to initialise scheduling tool.", isError: true });
       }
-      setSites(data || []);
     })();
-  }, [companyId]);
+  }, [navigate, accountId, resolveAccountId]);
+
+  // Load tenant companies + memberships to enforce allowedCompanies
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!accountId) return;
+
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw authErr;
+
+        const userId = authData?.user?.id;
+        if (!userId) throw new Error("Not signed in.");
+
+        const { data: compRows, error: compErr } = await supabase
+          .from("companies")
+          .select("id,name,account_id")
+          .eq("account_id", accountId)
+          .order("name", { ascending: true });
+        if (compErr) throw compErr;
+
+        const { data: cuRows, error: cuErr } = await supabase
+          .from("company_users")
+          .select("company_id,account_id")
+          .eq("user_id", userId)
+          .eq("account_id", accountId);
+        if (cuErr) throw cuErr;
+
+        const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
+        if (memberCompanyIds.size === 0) throw new Error("No companies assigned to this user in company_users for this account.");
+
+        const allowed = (compRows || []).filter((c) => memberCompanyIds.has(c.id));
+        if (!allowed.length) throw new Error("Your company memberships do not match any companies in this tenant.");
+
+        setAllowedCompanies(allowed);
+
+        // Keep selection if still valid, else default to first allowed
+        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
+      } catch (e) {
+        setStatus({ text: e?.message || "Failed to load companies.", isError: true });
+      }
+    })();
+  }, [accountId]);
+
+  // Load sites for selected company (tenant-scoped)
+  useEffect(() => {
+    (async () => {
+      try {
+        setSites([]);
+        setSiteId("");
+
+        if (!accountId || !companyId) return;
+
+        const { data, error } = await supabase
+          .from("sites")
+          .select("id,name,company_id,account_id")
+          .eq("account_id", accountId)
+          .eq("company_id", companyId)
+          .order("name", { ascending: true });
+
+        if (error) throw error;
+
+        const list = data || [];
+        setSites(list);
+
+        // Auto-select first site if exists
+        setSiteId((prev) => (prev && list.some((s) => s.id === prev) ? prev : (list[0]?.id || "")));
+      } catch (e) {
+        setStatus({ text: e?.message || "Failed to load sites.", isError: true });
+      }
+    })();
+  }, [accountId, companyId]);
 
   // Derived context store
   const ctx = useMemo(() => {
@@ -199,9 +273,7 @@ export default function SchedulingTool() {
   const availableByMhe = useMemo(() => ctx.__availableByMhe || {}, [ctx]);
 
   const mheTypes = useMemo(() => {
-    const types = (cfgMhe || [])
-      .map((r) => (r.type || "").trim())
-      .filter(Boolean);
+    const types = (cfgMhe || []).map((r) => (r.type || "").trim()).filter(Boolean);
     const uniq = Array.from(new Set(types));
     return uniq.length ? uniq : ["PPT", "CB", "VNA"];
   }, [cfgMhe]);
@@ -231,10 +303,7 @@ export default function SchedulingTool() {
 
   const summary = useMemo(() => {
     const byMhe = {};
-    let planDirect = 0,
-      planIndirect = 0,
-      actDirect = 0,
-      actIndirect = 0;
+    let planDirect = 0, planIndirect = 0, actDirect = 0, actIndirect = 0;
 
     for (const t of cfgTasks) {
       const cat = (t.category || "Direct").trim();
@@ -263,16 +332,7 @@ export default function SchedulingTool() {
     const totalPlan = planDirect + planIndirect;
     const totalActual = actDirect + actIndirect;
 
-    return {
-      byMhe,
-      planDirect,
-      planIndirect,
-      actDirect,
-      actIndirect,
-      totalAvail,
-      totalPlan,
-      totalActual,
-    };
+    return { byMhe, planDirect, planIndirect, actDirect, actIndirect, totalAvail, totalPlan, totalActual };
   }, [cfgTasks, calcByTaskId, mheTypes, availableByMhe]);
 
   // Mutators
@@ -299,17 +359,9 @@ export default function SchedulingTool() {
   };
 
   const saveToDb = useCallback(async () => {
-    if (!supabase) {
-      setStatus({
-        text: "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.",
-        isError: true,
-      });
-      return;
-    }
-    if (!siteId) {
-      setStatus({ text: "Select a Site before saving.", isError: true });
-      return;
-    }
+    if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
+    if (!companyId) return setStatus({ text: "Select a Company before saving.", isError: true });
+    if (!siteId) return setStatus({ text: "Select a Site before saving.", isError: true });
 
     const rows = [];
 
@@ -322,6 +374,7 @@ export default function SchedulingTool() {
       if (avail === 0 && planned === 0 && actual === 0) continue;
 
       rows.push({
+        account_id: accountId,
         site_id: siteId,
         scheduled_date: date,
         shift_code: shift,
@@ -352,6 +405,7 @@ export default function SchedulingTool() {
       const isIndirect = category === "Indirect";
 
       rows.push({
+        account_id: accountId,
         site_id: siteId,
         scheduled_date: date,
         shift_code: shift,
@@ -366,26 +420,22 @@ export default function SchedulingTool() {
       });
     }
 
-    if (rows.length === 0) {
-      setStatus({ text: "Nothing to save for this date/shift.", isError: true });
-      return;
-    }
+    if (rows.length === 0) return setStatus({ text: "Nothing to save for this date/shift.", isError: true });
 
     const { error } = await supabase.from("scheduling_entries").upsert(rows);
-    if (error) {
-      setStatus({ text: `DB write failed: ${error.message}`, isError: true });
-      return;
-    }
+    if (error) return setStatus({ text: `DB write failed: ${error.message}`, isError: true });
 
     setStatus({ text: `Saved ${rows.length} row(s) to scheduling_entries.`, isError: false });
   }, [
+    accountId,
+    companyId,
+    siteId,
     availableByMhe,
     calcByTaskId,
     cfgTasks,
     date,
     mheTypes,
     shift,
-    siteId,
     summary.byMhe,
     volumesByTaskId,
   ]);
@@ -393,48 +443,36 @@ export default function SchedulingTool() {
   // Daily summary
   const [dailyRows, setDailyRows] = useState([]);
   const refreshDaily = useCallback(async () => {
-    if (!supabase) {
-      setStatus({ text: "Supabase not configured.", isError: true });
-      return;
-    }
-    if (!siteId) {
-      setStatus({ text: "Select a Site to view daily summary.", isError: true });
-      return;
-    }
+    if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
+    if (!siteId) return setStatus({ text: "Select a Site to view daily summary.", isError: true });
 
     const { data, error } = await supabase
       .from("scheduling_entries")
-      .select(
-        "shift_code, task_name, hours_direct_plan, hours_indirect_plan, hours_direct_actual, hours_indirect_actual, hours_direct_expected, hours_indirect_expected"
-      )
+      .select("shift_code, task_name, hours_direct_plan, hours_indirect_plan, hours_direct_actual, hours_indirect_actual")
+      .eq("account_id", accountId)
       .eq("site_id", siteId)
       .eq("scheduled_date", date);
 
-    if (error) {
-      setStatus({ text: `Daily summary read failed: ${error.message}`, isError: true });
-      return;
-    }
+    if (error) return setStatus({ text: `Daily summary read failed: ${error.message}`, isError: true });
 
     const shifts = ["AM", "PM", "Nights"];
     const map = {};
-    for (const s of shifts) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0, exp: 0 };
+    for (const s of shifts) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0 };
 
     for (const r of data || []) {
       const s = (r.shift_code || "AM").trim();
-      if (!map[s]) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0, exp: 0 };
-
+      if (!map[s]) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0 };
       if ((r.task_name || "").startsWith("__")) continue;
 
       map[s].pd += safeNum(r.hours_direct_plan);
       map[s].pi += safeNum(r.hours_indirect_plan);
       map[s].ad += safeNum(r.hours_direct_actual);
       map[s].ai += safeNum(r.hours_indirect_actual);
-      map[s].exp += safeNum(r.hours_direct_expected) + safeNum(r.hours_indirect_expected);
     }
 
     setDailyRows(shifts.map((s) => map[s]));
     setStatus({ text: "Daily summary refreshed.", isError: false });
-  }, [date, siteId]);
+  }, [accountId, date, siteId]);
 
   // Auto refresh daily when opening tab
   const prevTab = useRef(tab);
@@ -458,43 +496,29 @@ export default function SchedulingTool() {
         }
       >
         <div className="wi-sched-tabs">
-          <button
-            className={tab === "capability" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"}
-            onClick={() => setTab("capability")}
-          >
+          <button className={tab === "capability" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"} onClick={() => setTab("capability")}>
             Capability plan
           </button>
-          <button
-            className={tab === "pva" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"}
-            onClick={() => setTab("pva")}
-          >
+          <button className={tab === "pva" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"} onClick={() => setTab("pva")}>
             Plan vs Actual
           </button>
-          <button
-            className={tab === "config" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"}
-            onClick={() => setTab("config")}
-          >
+          <button className={tab === "config" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"} onClick={() => setTab("config")}>
             Configuration
           </button>
-          <button
-            className={tab === "daily" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"}
-            onClick={() => setTab("daily")}
-          >
+          <button className={tab === "daily" ? "wi-sched-tab wi-sched-tab--active" : "wi-sched-tab"} onClick={() => setTab("daily")}>
             Daily summary
           </button>
         </div>
 
-        <div className={status.isError ? "wi-sched-status wi-sched-status--error" : "wi-sched-status"}>
-          {status.text}
-        </div>
+        <div className={status.isError ? "wi-sched-status wi-sched-status--error" : "wi-sched-status"}>{status.text}</div>
 
         {/* Context controls */}
         <div className="wi-sched-grid">
           <label className="wi-sched-label">
             Company
-            <select className="wi-sched-control" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-              <option value="">{supabase ? "Select company" : "Supabase not configured"}</option>
-              {companies.map((c) => (
+            <select className="wi-sched-control" value={companyId} onChange={(e) => setCompanyId(e.target.value)} disabled={allowedCompanies.length <= 1}>
+              <option value="">{allowedCompanies.length ? "Select company" : "Loading…"}</option>
+              {allowedCompanies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
@@ -504,12 +528,7 @@ export default function SchedulingTool() {
 
           <label className="wi-sched-label">
             Site
-            <select
-              className="wi-sched-control"
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-              disabled={!companyId || sites.length === 0}
-            >
+            <select className="wi-sched-control" value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={!companyId || sites.length === 0}>
               <option value="">{!companyId ? "Select a company first" : "Select site"}</option>
               {sites.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -528,12 +547,7 @@ export default function SchedulingTool() {
             Shift
             <div className="wi-sched-seg">
               {["AM", "PM", "Nights"].map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={shift === s ? "wi-sched-segBtn wi-sched-segBtn--active" : "wi-sched-segBtn"}
-                  onClick={() => setShift(s)}
-                >
+                <button key={s} type="button" className={shift === s ? "wi-sched-segBtn wi-sched-segBtn--active" : "wi-sched-segBtn"} onClick={() => setShift(s)}>
                   {s}
                 </button>
               ))}
@@ -545,9 +559,7 @@ export default function SchedulingTool() {
         {tab === "capability" && (
           <div className="wi-sched-section">
             <h3 className="wi-sched-h3">Capability</h3>
-            <div className="wi-sched-muted">
-              Enter hours available per MHE type. Planned hours are calculated from planned volumes.
-            </div>
+            <div className="wi-sched-muted">Enter hours available per MHE type. Planned hours are calculated from planned volumes.</div>
 
             <div className="wi-sched-kpis">
               <div className="wi-sched-kpi">
@@ -633,9 +645,7 @@ export default function SchedulingTool() {
                             min="0"
                             step="1"
                             value={pv}
-                            onChange={(e) =>
-                              setTask(t.id, { planVolume: e.target.value === "" ? "" : Number(e.target.value) })
-                            }
+                            onChange={(e) => setTask(t.id, { planVolume: e.target.value === "" ? "" : Number(e.target.value) })}
                           />
                         </td>
                         <td className="num">{ph.toFixed(2)}</td>
@@ -652,9 +662,7 @@ export default function SchedulingTool() {
         {tab === "pva" && (
           <div className="wi-sched-section">
             <h3 className="wi-sched-h3">Actual volumes</h3>
-            <div className="wi-sched-muted">
-              Enter actual volumes to calculate actual hours and compare to plan.
-            </div>
+            <div className="wi-sched-muted">Enter actual volumes to calculate actual hours and compare to plan.</div>
 
             <div className="wi-sched-tableWrap">
               <table className="wi-sched-table">
@@ -684,9 +692,7 @@ export default function SchedulingTool() {
                             min="0"
                             step="1"
                             value={av}
-                            onChange={(e) =>
-                              setTask(t.id, { actualVolume: e.target.value === "" ? "" : Number(e.target.value) })
-                            }
+                            onChange={(e) => setTask(t.id, { actualVolume: e.target.value === "" ? "" : Number(e.target.value) })}
                           />
                         </td>
                         <td className="num">{ah.toFixed(2)}</td>
@@ -703,9 +709,7 @@ export default function SchedulingTool() {
         {tab === "config" && (
           <div className="wi-sched-section">
             <h3 className="wi-sched-h3">Configuration</h3>
-            <div className="wi-sched-muted">
-              This is a minimal “reset” configuration view. We can expand it later, but keeping it aligned to Users/Password styling.
-            </div>
+            <div className="wi-sched-muted">Minimal configuration view (aligned to Users/Password styling).</div>
 
             <div className="wi-sched-configGrid">
               <div>
@@ -749,10 +753,7 @@ export default function SchedulingTool() {
                 ))}
 
                 <div className="wi-sched-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
-                  <Button
-                    variant="primary"
-                    onClick={() => setCfgMhe((prev) => [...prev, { id: uid(), label: "New resource", type: "", count: 0 }])}
-                  >
+                  <Button variant="primary" onClick={() => setCfgMhe((prev) => [...prev, { id: uid(), label: "New resource", type: "", count: 0 }])}>
                     Add resource
                   </Button>
                 </div>
@@ -804,15 +805,7 @@ export default function SchedulingTool() {
                     onClick={() =>
                       setCfgTasks((prev) => [
                         ...prev,
-                        {
-                          id: uid(),
-                          name: "New task",
-                          area: "",
-                          resource: mheTypes[0] || "",
-                          unit: "Units",
-                          minutesPerUnit: 1,
-                          category: "Direct",
-                        },
+                        { id: uid(), name: "New task", area: "", resource: mheTypes[0] || "", unit: "Units", minutesPerUnit: 1, category: "Direct" },
                       ])
                     }
                   >

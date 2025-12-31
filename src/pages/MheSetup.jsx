@@ -1,18 +1,13 @@
 // /src/pages/MheSetup.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabaseClient";
 
 import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 
 import "./MheSetup.css";
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase =
-  SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 const safe = (v) => (v === null || v === undefined ? "" : String(v));
 
@@ -99,10 +94,15 @@ export default function MheSetup() {
   const [status, setStatus] = useState({ text: "Ready.", isError: false });
 
   const [tab, setTab] = useState("table"); // table | add | types
+  const [accountId, setAccountId] = useState(""); // tenant boundary
 
   const [companies, setCompanies] = useState([]);
   const [sites, setSites] = useState([]);
   const [types, setTypes] = useState([]);
+
+  // Multi-company enforcement
+  const [allowedCompanies, setAllowedCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState(""); // selected company
 
   const [assetSite, setAssetSite] = useState("");
   const [assets, setAssets] = useState([]);
@@ -127,15 +127,43 @@ export default function MheSetup() {
 
   const onSelectNav = (key) => navigate(pathFromKey(key));
 
-  const requireSession = useCallback(async () => {
-    if (!supabase) {
-      setStatus({
-        text: "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.",
-        isError: true,
-      });
-      return null;
+  const selectedCompanyName = useMemo(() => {
+    return (allowedCompanies || []).find((c) => c.id === companyId)?.name || "";
+  }, [allowedCompanies, companyId]);
+
+  /**
+   * Resolve tenant boundary (account_id) for the logged-in user.
+   * Primary: public.users (id = auth.user.id) -> account_id
+   * Fallback: public.company_users (user_id = auth.user.id) -> account_id
+   */
+  const resolveAccountId = useCallback(async (userId) => {
+    // Try users table
+    {
+      const { data, error } = await supabase
+        .from("users")
+        .select("account_id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (!error && data?.account_id) return data.account_id;
     }
 
+    // Fallback: company_users table
+    {
+      const { data, error } = await supabase
+        .from("company_users")
+        .select("account_id")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data?.account_id) return data.account_id;
+    }
+
+    return "";
+  }, []);
+
+  const requireSession = useCallback(async () => {
     const { data, error } = await supabase.auth.getSession();
     if (error) {
       setStatus({ text: `Auth error: ${error.message}`, isError: true });
@@ -149,32 +177,85 @@ export default function MheSetup() {
     }
 
     setEmail(user.email || "");
-    return user;
-  }, [navigate]);
 
-  const loadCompaniesSites = useCallback(async () => {
-    const { data: c, error: ec } = await supabase.from("companies").select("id, name").order("name");
+    // Ensure account_id is loaded once per session
+    if (!accountId) {
+      const aId = await resolveAccountId(user.id);
+      if (!aId) {
+        setStatus({
+          text: "Could not resolve account_id for this user. Ensure public.users (or company_users) contains account_id.",
+          isError: true,
+        });
+        return null;
+      }
+      setAccountId(aId);
+    }
+
+    return user;
+  }, [navigate, accountId, resolveAccountId]);
+
+  const loadCompaniesSitesAndMemberships = useCallback(async () => {
+    if (!accountId) return;
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr) throw authErr;
+    const userId = authData?.user?.id;
+    if (!userId) throw new Error("No authenticated user found.");
+
+    // Tenant-scoped companies + sites
+    const { data: c, error: ec } = await supabase
+      .from("companies")
+      .select("id, name, account_id")
+      .eq("account_id", accountId)
+      .order("name");
     if (ec) throw ec;
-    const companiesList = c || [];
-    setCompanies(companiesList);
 
     const { data: s, error: es } = await supabase
       .from("sites")
-      .select("id, company_id, name, code, created_at")
+      .select("id, company_id, name, code, created_at, account_id")
+      .eq("account_id", accountId)
       .order("created_at", { ascending: false });
     if (es) throw es;
 
+    const companiesList = c || [];
     const sitesList = s || [];
+
+    setCompanies(companiesList);
     setSites(sitesList);
 
-    if (sitesList.length) {
-      if (!assetSite || !sitesList.some((x) => x.id === assetSite)) setAssetSite(sitesList[0].id);
-    } else {
+    // Memberships: user can belong to multiple companies
+    const { data: cuRows, error: cuError } = await supabase
+      .from("company_users")
+      .select("company_id, account_id")
+      .eq("user_id", userId)
+      .eq("account_id", accountId);
+
+    if (cuError) throw cuError;
+
+    const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
+    if (memberCompanyIds.size === 0) {
+      setAllowedCompanies([]);
+      setCompanyId("");
       setAssetSite("");
+      throw new Error("No companies assigned to this user in company_users for this account.");
     }
-  }, [assetSite]);
+
+    const allowed = companiesList.filter((co) => memberCompanyIds.has(co.id));
+    if (!allowed.length) {
+      setAllowedCompanies([]);
+      setCompanyId("");
+      setAssetSite("");
+      throw new Error("Your company memberships do not match any companies in this tenant.");
+    }
+
+    setAllowedCompanies(allowed);
+
+    // Keep current company if still valid, else default to first allowed
+    setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
+  }, [accountId]);
 
   const loadTypes = useCallback(async () => {
+    // Note: mhe_types is currently treated as global (no account_id).
     const { data, error } = await supabase
       .from("mhe_types")
       .select("id, type_name, requires_loler, requires_puwer, created_at")
@@ -186,14 +267,33 @@ export default function MheSetup() {
     setTypes(list);
 
     if (list.length) {
-      if (!assetType || !list.some((t) => t.id === assetType)) setAssetType(list[0].id);
+      setAssetType((prev) => (prev && list.some((t) => t.id === prev) ? prev : list[0].id));
     } else {
       setAssetType("");
     }
-  }, [assetType]);
+  }, []);
+
+  const sitesForSelectedCompany = useMemo(() => {
+    if (!companyId) return [];
+    return (sites || []).filter((s) => s.company_id === companyId);
+  }, [sites, companyId]);
+
+  // Ensure assetSite remains valid for selected company, else pick first site
+  useEffect(() => {
+    if (!companyId) {
+      setAssetSite("");
+      return;
+    }
+
+    const companySites = (sites || []).filter((s) => s.company_id === companyId);
+    const firstSite = companySites[0];
+
+    setAssetSite((prev) => (prev && companySites.some((x) => x.id === prev) ? prev : (firstSite?.id || "")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, sites]);
 
   const loadAssets = useCallback(async () => {
-    if (!assetSite) {
+    if (!accountId || !assetSite) {
       setAssets([]);
       return;
     }
@@ -201,8 +301,9 @@ export default function MheSetup() {
     const { data, error } = await supabase
       .from("mhe_assets")
       .select(
-        "id, site_id, mhe_type_id, asset_tag, serial_number, manufacturer, model, purchase_date, status, created_at, next_inspection_due, next_loler_due, next_service_due, next_puwer_due"
+        "id, site_id, mhe_type_id, asset_tag, serial_number, manufacturer, model, purchase_date, status, created_at, next_inspection_due, next_loler_due, next_service_due, next_puwer_due, account_id"
       )
+      .eq("account_id", accountId)
       .eq("site_id", assetSite);
 
     if (error) throw error;
@@ -243,7 +344,7 @@ export default function MheSetup() {
 
     rows.sort((a, b) => a._sortBucket - b._sortBucket || a._sortKey - b._sortKey);
     setAssets(rows);
-  }, [assetSite, sites, companies, types]);
+  }, [assetSite, sites, companies, types, accountId]);
 
   const clearAssetForm = useCallback(() => {
     setEditingAssetId(null);
@@ -332,13 +433,17 @@ export default function MheSetup() {
     try {
       const user = await requireSession();
       if (!user) return;
+      if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
 
       const site_id = assetSite;
       const mhe_type_id = assetType || null;
-      if (!site_id) return setStatus({ text: "Select a site (Assets table tab).", isError: true });
+
+      if (!companyId) return setStatus({ text: "Select a company.", isError: true });
+      if (!site_id) return setStatus({ text: "Select a site.", isError: true });
       if (!mhe_type_id) return setStatus({ text: "Select an MHE type.", isError: true });
 
       const payload = {
+        account_id: accountId,
         site_id,
         mhe_type_id,
         asset_tag: assetTag.trim() || null,
@@ -362,8 +467,13 @@ export default function MheSetup() {
         if (error) throw error;
         setStatus({ text: "Asset added.", isError: false });
       } else {
-        const { error } = await supabase.from("mhe_assets").update(payload).eq("id", editingAssetId);
+        const { error } = await supabase
+          .from("mhe_assets")
+          .update(payload)
+          .eq("id", editingAssetId)
+          .eq("account_id", accountId);
         if (error) throw error;
+
         setStatus({ text: "Asset updated.", isError: false });
         clearAssetForm();
       }
@@ -375,6 +485,8 @@ export default function MheSetup() {
     }
   }, [
     requireSession,
+    accountId,
+    companyId,
     assetSite,
     assetType,
     assetTag,
@@ -392,54 +504,71 @@ export default function MheSetup() {
     loadAssets,
   ]);
 
-  const editAsset = useCallback(async (id) => {
-    try {
-      const user = await requireSession();
-      if (!user) return;
+  const editAsset = useCallback(
+    async (id) => {
+      try {
+        const user = await requireSession();
+        if (!user) return;
+        if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
 
-      const { data, error } = await supabase.from("mhe_assets").select("*").eq("id", id).single();
-      if (error) throw error;
+        const { data, error } = await supabase
+          .from("mhe_assets")
+          .select("*")
+          .eq("id", id)
+          .eq("account_id", accountId)
+          .single();
+        if (error) throw error;
 
-      setEditingAssetId(data.id);
+        setEditingAssetId(data.id);
 
-      setAssetSite(data.site_id);
-      setAssetType(data.mhe_type_id || "");
-      setAssetTag(data.asset_tag || "");
-      setAssetSerial(data.serial_number || "");
-      setAssetMfr(data.manufacturer || "");
-      setAssetModel(data.model || "");
-      setAssetPurchase(data.purchase_date || "");
-      setAssetStatus(data.status || "active");
+        // ensure company selection matches the asset's site
+        const site = sites.find((s) => s.id === data.site_id);
+        if (site?.company_id) setCompanyId(site.company_id);
 
-      setAssetNextInspection(data.next_inspection_due || "");
-      setAssetNextLoler(data.next_loler_due || "");
-      setAssetNextService(data.next_service_due || "");
-      setAssetNextPuwer(data.next_puwer_due || "");
+        setAssetSite(data.site_id);
+        setAssetType(data.mhe_type_id || "");
+        setAssetTag(data.asset_tag || "");
+        setAssetSerial(data.serial_number || "");
+        setAssetMfr(data.manufacturer || "");
+        setAssetModel(data.model || "");
+        setAssetPurchase(data.purchase_date || "");
+        setAssetStatus(data.status || "active");
 
-      setTab("add");
-      setStatus({ text: "Editing asset. Make changes and click Save.", isError: false });
-    } catch (e) {
-      setStatus({ text: e?.message || String(e), isError: true });
-    }
-  }, [requireSession]);
+        setAssetNextInspection(data.next_inspection_due || "");
+        setAssetNextLoler(data.next_loler_due || "");
+        setAssetNextService(data.next_service_due || "");
+        setAssetNextPuwer(data.next_puwer_due || "");
 
-  const deleteAsset = useCallback(async (id) => {
-    try {
-      const user = await requireSession();
-      if (!user) return;
+        setTab("add");
+        setStatus({ text: "Editing asset. Make changes and click Save.", isError: false });
+      } catch (e) {
+        setStatus({ text: e?.message || String(e), isError: true });
+      }
+    },
+    [requireSession, accountId, sites]
+  );
 
-      if (!window.confirm("Delete this asset?")) return;
+  const deleteAsset = useCallback(
+    async (id) => {
+      try {
+        const user = await requireSession();
+        if (!user) return;
+        if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
 
-      const { error } = await supabase.from("mhe_assets").delete().eq("id", id);
-      if (error) throw error;
+        if (!window.confirm("Delete this asset?")) return;
 
-      if (editingAssetId === id) clearAssetForm();
-      setStatus({ text: "Asset deleted.", isError: false });
-      await loadAssets();
-    } catch (e) {
-      setStatus({ text: e?.message || String(e), isError: true });
-    }
-  }, [requireSession, editingAssetId, clearAssetForm, loadAssets]);
+        const { error } = await supabase.from("mhe_assets").delete().eq("id", id).eq("account_id", accountId);
+        if (error) throw error;
+
+        if (editingAssetId === id) clearAssetForm();
+        setStatus({ text: "Asset deleted.", isError: false });
+        await loadAssets();
+      } catch (e) {
+        setStatus({ text: e?.message || String(e), isError: true });
+      }
+    },
+    [requireSession, accountId, editingAssetId, clearAssetForm, loadAssets]
+  );
 
   useEffect(() => {
     (async () => {
@@ -447,9 +576,7 @@ export default function MheSetup() {
       if (!user) return;
 
       try {
-        await loadCompaniesSites();
-        await loadTypes();
-        setStatus({ text: "Ready.", isError: false });
+        setStatus({ text: "Loading…", isError: false });
       } catch (e) {
         setStatus({ text: e?.message || String(e), isError: true });
       }
@@ -457,25 +584,43 @@ export default function MheSetup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Once accountId exists, load tenant-scoped reference data + memberships
   useEffect(() => {
     (async () => {
       try {
-        if (!supabase) return;
+        if (!accountId) return;
+
+        await loadCompaniesSitesAndMemberships();
+        await loadTypes();
+        await loadAssets();
+
+        setStatus({ text: "Ready.", isError: false });
+      } catch (e) {
+        setStatus({ text: e?.message || String(e), isError: true });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  // Reload assets when site/types/sites/companies/company selection change
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!accountId) return;
         await loadAssets();
       } catch (e) {
         setStatus({ text: e?.message || String(e), isError: true });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetSite, types, sites, companies]);
+  }, [assetSite, types, sites, companies, companyId, accountId]);
 
   const siteOptions = useMemo(() => {
-    return sites.map((site) => {
-      const comp = companies.find((x) => x.id === site.company_id);
-      const label = `${safe(comp?.name)} – ${safe(site.name)}${site.code ? " (" + safe(site.code) + ")" : ""}`;
+    return sitesForSelectedCompany.map((site) => {
+      const label = `${safe(selectedCompanyName)} – ${safe(site.name)}${site.code ? " (" + safe(site.code) + ")" : ""}`;
       return { id: site.id, label };
     });
-  }, [sites, companies]);
+  }, [sitesForSelectedCompany, selectedCompanyName]);
 
   return (
     <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
@@ -487,9 +632,19 @@ export default function MheSetup() {
             <Button
               variant="primary"
               onClick={async () => {
-                await loadCompaniesSites();
-                await loadTypes();
-                await loadAssets();
+                try {
+                  if (!accountId) {
+                    setStatus({ text: "No account_id resolved for this session.", isError: true });
+                    return;
+                  }
+                  setStatus({ text: "Reloading…", isError: false });
+                  await loadCompaniesSitesAndMemberships();
+                  await loadTypes();
+                  await loadAssets();
+                  setStatus({ text: "Ready.", isError: false });
+                } catch (e) {
+                  setStatus({ text: e?.message || String(e), isError: true });
+                }
               }}
             >
               Reload
@@ -497,8 +652,27 @@ export default function MheSetup() {
           </div>
         }
       >
-        <div className={status.isError ? "wi-mhe-status wi-mhe-status--error" : "wi-mhe-status"}>
-          {status.text}
+        <div className={status.isError ? "wi-mhe-status wi-mhe-status--error" : "wi-mhe-status"}>{status.text}</div>
+
+        {/* Multi-company selector */}
+        <div className="wi-mhe-section" style={{ marginBottom: 10 }}>
+          <label className="wi-mhe-label">Company</label>
+          <select
+            className="wi-mhe-control"
+            value={companyId}
+            onChange={(e) => {
+              if (editingAssetId) clearAssetForm();
+              setCompanyId(e.target.value);
+            }}
+            disabled={!allowedCompanies.length}
+          >
+            <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+            {allowedCompanies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="wi-mhe-tabs">
@@ -523,6 +697,7 @@ export default function MheSetup() {
                 if (editingAssetId) clearAssetForm();
                 setAssetSite(e.target.value);
               }}
+              disabled={!companyId}
             >
               {siteOptions.length ? (
                 siteOptions.map((o) => (
@@ -531,7 +706,7 @@ export default function MheSetup() {
                   </option>
                 ))
               ) : (
-                <option value="">No sites yet</option>
+                <option value="">{companyId ? "No sites for this company yet" : "Select a company first"}</option>
               )}
             </select>
 
@@ -554,7 +729,13 @@ export default function MheSetup() {
                   </tr>
                 </thead>
                 <tbody>
-                  {!assetSite ? (
+                  {!companyId ? (
+                    <tr>
+                      <td colSpan={12} className="wi-mhe-muted" style={{ padding: 10 }}>
+                        Select a company first.
+                      </td>
+                    </tr>
+                  ) : !assetSite ? (
                     <tr>
                       <td colSpan={12} className="wi-mhe-muted" style={{ padding: 10 }}>
                         Create/select a site first.
@@ -641,7 +822,7 @@ export default function MheSetup() {
 
         {tab === "add" && (
           <div className="wi-mhe-section">
-            <div className="wi-mhe-muted">Site is selected on the Assets table tab.</div>
+            <div className="wi-mhe-muted">Company/Site are selected on the Assets table tab.</div>
 
             <label className="wi-mhe-label">MHE type</label>
             <select className="wi-mhe-control" value={assetType} onChange={(e) => setAssetType(e.target.value)}>

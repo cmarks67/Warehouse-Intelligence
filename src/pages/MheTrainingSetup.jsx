@@ -1,5 +1,6 @@
 // /src/pages/MheTrainingSetup.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
@@ -28,18 +29,61 @@ function daysUntil(ymd) {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+function activeFromPath(pathname) {
+  if (pathname.startsWith("/app/setup/mhe-training")) return "mhe-training";
+  if (pathname.startsWith("/app/setup/mhe")) return "mhe-setup";
+  if (pathname.startsWith("/app/setup/companies-sites")) return "company-site-setup";
+  if (pathname.startsWith("/app/tools/scheduling")) return "scheduling-tool";
+  if (pathname.startsWith("/app/connections")) return "connections";
+  if (pathname.startsWith("/app/users")) return "users";
+  if (pathname.startsWith("/app/password")) return "password";
+  return "overview";
+}
+
+function pathFromKey(key) {
+  switch (key) {
+    case "overview":
+      return "/app/dashboard";
+    case "company-site-setup":
+      return "/app/setup/companies-sites";
+    case "mhe-setup":
+      return "/app/setup/mhe";
+    case "mhe-training":
+      return "/app/setup/mhe-training";
+    case "connections":
+      return "/app/connections";
+    case "scheduling-tool":
+      return "/app/tools/scheduling";
+    case "users":
+      return "/app/users";
+    case "password":
+      return "/app/password";
+    default:
+      return "/app/dashboard";
+  }
+}
+
 export default function MheTrainingSetup() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const activeNav = useMemo(() => activeFromPath(location.pathname), [location.pathname]);
+  const onSelectNav = (key) => navigate(pathFromKey(key));
+
   const [tab, setTab] = useState("register"); // register | history
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState({ type: "", message: "" });
 
-  // Company enforcement
+  const [email, setEmail] = useState("");
+  const [accountId, setAccountId] = useState("");
+
+  // Tenant reference data
   const [companies, setCompanies] = useState([]);
   const [sites, setSites] = useState([]);
   const [mheTypes, setMheTypes] = useState([]);
 
-  const [lockedCompanyId, setLockedCompanyId] = useState("");
-  const [lockedCompanyName, setLockedCompanyName] = useState("");
+  // Multi-company enforcement
+  const [allowedCompanies, setAllowedCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState(""); // selected company
 
   // Filters
   const [siteId, setSiteId] = useState("");
@@ -88,7 +132,34 @@ export default function MheTrainingSetup() {
     certificatePath: "",
   });
 
-  // ---------- Init (company lock + ref data) ----------
+  const selectedCompanyName = useMemo(() => {
+    return (allowedCompanies || []).find((c) => c.id === companyId)?.name || "";
+  }, [allowedCompanies, companyId]);
+
+  const resolveAccountId = useCallback(async (userId) => {
+    // Primary: public.users
+    const { data: uRow, error: uErr } = await supabase
+      .from("users")
+      .select("account_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!uErr && uRow?.account_id) return uRow.account_id;
+
+    // Fallback: company_users
+    const { data: cuRow, error: cuErr } = await supabase
+      .from("company_users")
+      .select("account_id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!cuErr && cuRow?.account_id) return cuRow.account_id;
+
+    return "";
+  }, []);
+
+  // ---------- Init (session + tenant boundary) ----------
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -98,25 +169,50 @@ export default function MheTrainingSetup() {
         const { data: authData, error: authErr } = await supabase.auth.getUser();
         if (authErr) throw authErr;
 
+        const user = authData?.user;
+        if (!user?.id) throw new Error("Not signed in.");
+
+        setEmail(user.email || "");
+
+        const aId = await resolveAccountId(user.id);
+        if (!aId) throw new Error("Could not resolve account_id for this user.");
+
+        setAccountId(aId);
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Failed to initialise MHE training." });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [resolveAccountId]);
+
+  // ---------- Load reference data + memberships (multi-company) ----------
+  useEffect(() => {
+    if (!accountId) return;
+
+    (async () => {
+      setLoading(true);
+      setNotice({ type: "", message: "" });
+
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw authErr;
         const userId = authData?.user?.id;
         if (!userId) throw new Error("Not signed in.");
 
-        const { data: cu, error: cuErr } = await supabase
-          .from("company_users")
-          .select("company_id")
-          .eq("user_id", userId)
-          .limit(1)
-          .maybeSingle();
-
-        if (cuErr) throw cuErr;
-        if (!cu?.company_id) throw new Error("No company assigned to this user (company_users).");
-
-        setLockedCompanyId(cu.company_id);
-
         const [{ data: compData, error: compErr }, { data: siteData, error: siteErr }, { data: typesData, error: typeErr }] =
           await Promise.all([
-            supabase.from("companies").select("id, name").order("name", { ascending: true }),
-            supabase.from("sites").select("id, name, company_id").order("name", { ascending: true }),
+            supabase
+              .from("companies")
+              .select("id, name, account_id")
+              .eq("account_id", accountId)
+              .order("name", { ascending: true }),
+            supabase
+              .from("sites")
+              .select("id, name, company_id, account_id")
+              .eq("account_id", accountId)
+              .order("name", { ascending: true }),
+            // mhe_types currently treated as global (no account_id)
             supabase.from("mhe_types").select("id, type_name").order("type_name", { ascending: true }),
           ]);
 
@@ -128,31 +224,54 @@ export default function MheTrainingSetup() {
         setSites(siteData || []);
         setMheTypes(typesData || []);
 
-        const compName = (compData || []).find((c) => c.id === cu.company_id)?.name || "";
-        setLockedCompanyName(compName);
+        // memberships for this tenant
+        const { data: cuRows, error: cuError } = await supabase
+          .from("company_users")
+          .select("company_id, account_id")
+          .eq("user_id", userId)
+          .eq("account_id", accountId);
 
-        const firstSite = (siteData || []).find((s) => s.company_id === cu.company_id);
-        if (firstSite?.id) setSiteId(firstSite.id);
+        if (cuError) throw cuError;
+
+        const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
+        if (memberCompanyIds.size === 0) throw new Error("No companies assigned to this user in company_users for this account.");
+
+        const allowed = (compData || []).filter((c) => memberCompanyIds.has(c.id));
+        if (allowed.length === 0) throw new Error("Your company memberships do not match any companies in this tenant.");
+
+        setAllowedCompanies(allowed);
+        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
       } catch (e) {
         setNotice({ type: "error", message: e?.message || "Failed to initialise MHE training." });
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [accountId]);
 
-  const sitesForCompany = useMemo(() => {
-    if (!lockedCompanyId) return [];
-    return (sites || []).filter((s) => s.company_id === lockedCompanyId);
-  }, [sites, lockedCompanyId]);
+  const sitesForSelectedCompany = useMemo(() => {
+    if (!companyId) return [];
+    return (sites || []).filter((s) => s.company_id === companyId);
+  }, [sites, companyId]);
 
   const siteName = useMemo(() => {
-    return sitesForCompany.find((s) => s.id === siteId)?.name || "";
-  }, [sitesForCompany, siteId]);
+    return sitesForSelectedCompany.find((s) => s.id === siteId)?.name || "";
+  }, [sitesForSelectedCompany, siteId]);
+
+  // Ensure siteId is valid for company selection
+  useEffect(() => {
+    if (!companyId) {
+      setSiteId("");
+      return;
+    }
+    const companySites = (sites || []).filter((s) => s.company_id === companyId);
+    const firstSite = companySites[0];
+    setSiteId((prev) => (prev && companySites.some((x) => x.id === prev) ? prev : (firstSite?.id || "")));
+  }, [companyId, sites]);
 
   // ---------- Register refresh ----------
   const refreshRegisterData = useCallback(async () => {
-    if (!siteId) {
+    if (!accountId || !siteId) {
       setSiteColleagues([]);
       setCurrentAuths([]);
       return;
@@ -160,7 +279,8 @@ export default function MheTrainingSetup() {
 
     const { data: cData, error: cErr } = await supabase
       .from("colleagues")
-      .select("id, first_name, last_name, employment_type, active")
+      .select("id, first_name, last_name, employment_type, active, site_id, account_id")
+      .eq("account_id", accountId)
       .eq("site_id", siteId)
       .order("last_name", { ascending: true });
 
@@ -169,12 +289,18 @@ export default function MheTrainingSetup() {
     const activeOnly = (cData || []).filter((c) => c.active === true);
     setSiteColleagues(activeOnly);
 
-    const { data: aData, error: aErr } = await supabase
+    // Current auths view (expected to include site_id; may include account_id depending on your view)
+    let aQuery = supabase
       .from("v_mhe_authorisations_current")
       .select("*")
       .eq("site_id", siteId)
       .order("last_name", { ascending: true });
 
+    // If your view has account_id (recommended), enforce it.
+    // If it does NOT, Supabase will return a column error — in that case remove this filter.
+    aQuery = aQuery.eq("account_id", accountId);
+
+    const { data: aData, error: aErr } = await aQuery;
     if (aErr) throw aErr;
 
     // Use expires_on as "next training due"
@@ -187,7 +313,7 @@ export default function MheTrainingSetup() {
     setCurrentAuths(normalised);
 
     if (!historyColleagueId && activeOnly.length) setHistoryColleagueId(activeOnly[0].id);
-  }, [siteId, historyColleagueId]);
+  }, [accountId, siteId, historyColleagueId]);
 
   useEffect(() => {
     (async () => {
@@ -238,8 +364,7 @@ export default function MheTrainingSetup() {
       })
       // Apply MHE filter at list level
       .map((c) => {
-        const filtered =
-          mheTypeFilter === "ALL" ? c._auths : c._auths.filter((a) => a.mhe_type_id === mheTypeFilter);
+        const filtered = mheTypeFilter === "ALL" ? c._auths : c._auths.filter((a) => a.mhe_type_id === mheTypeFilter);
         return { ...c, _visibleAuths: filtered };
       })
       .filter((c) => (mheTypeFilter === "ALL" ? true : c._visibleAuths.length > 0));
@@ -281,9 +406,9 @@ export default function MheTrainingSetup() {
   // ---------- Storage helpers ----------
   const uploadCertificate = async ({ colleagueId, mheTypeId, file }) => {
     if (!file) return { path: null };
+    if (!companyId) throw new Error("Select a company first.");
 
-    if (!lockedCompanyId) throw new Error("No company assigned.");
-    const path = `company/${lockedCompanyId}/colleague/${colleagueId}/mhe/${mheTypeId}/${Date.now()}_${file.name}`;
+    const path = `company/${companyId}/colleague/${colleagueId}/mhe/${mheTypeId}/${Date.now()}_${file.name}`;
 
     const { error: upErr } = await supabase.storage.from("mhe-certificates").upload(path, file, {
       cacheControl: "3600",
@@ -310,6 +435,7 @@ export default function MheTrainingSetup() {
 
     try {
       if (!pendingInlineUpload.authId) throw new Error("No authorisation selected.");
+
       const { path } = await uploadCertificate({
         colleagueId: pendingInlineUpload.colleagueId,
         mheTypeId: pendingInlineUpload.mheTypeId,
@@ -319,7 +445,8 @@ export default function MheTrainingSetup() {
       const { error: dbErr } = await supabase
         .from("colleague_mhe_authorisations")
         .update({ certificate_path: path })
-        .eq("id", pendingInlineUpload.authId);
+        .eq("id", pendingInlineUpload.authId)
+        .eq("account_id", accountId);
 
       if (dbErr) throw dbErr;
 
@@ -373,6 +500,7 @@ export default function MheTrainingSetup() {
 
     try {
       if (!addModal.colleague_id || !addModal.mhe_type_id) throw new Error("Select colleague and MHE type first.");
+
       const { path } = await uploadCertificate({
         colleagueId: addModal.colleague_id,
         mheTypeId: addModal.mhe_type_id,
@@ -391,6 +519,7 @@ export default function MheTrainingSetup() {
   const submitAdd = async () => {
     setNotice({ type: "", message: "" });
 
+    if (!companyId) return setNotice({ type: "error", message: "Select a company first." });
     if (!siteId) return setNotice({ type: "error", message: "Select a site first." });
     if (!addModal.colleague_id) return setNotice({ type: "error", message: "Colleague is required." });
     if (!addModal.mhe_type_id) return setNotice({ type: "error", message: "MHE type is required." });
@@ -405,11 +534,12 @@ export default function MheTrainingSetup() {
     setLoading(true);
     try {
       const payload = {
+        account_id: accountId,
         site_id: siteId,
         colleague_id: addModal.colleague_id,
         mhe_type_id: addModal.mhe_type_id,
         trained_on: addModal.trained_on,
-        expires_on: addModal.expires_on, // ✅ manual next training due stored here
+        expires_on: addModal.expires_on,
         status: "ACTIVE",
         certificate_path: addModal.certificatePath || null,
         notes: addModal.notes.trim() || null,
@@ -479,6 +609,26 @@ export default function MheTrainingSetup() {
     }
   };
 
+  const refreshHistory = useCallback(async () => {
+    if (!accountId || !historyColleagueId) {
+      setHistoryRows([]);
+      return;
+    }
+
+    let q = supabase
+      .from("colleague_mhe_authorisations")
+      .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path, notes, created_at, account_id")
+      .eq("account_id", accountId)
+      .eq("colleague_id", historyColleagueId)
+      .order("trained_on", { ascending: false });
+
+    if (historyMheTypeId !== "ALL") q = q.eq("mhe_type_id", historyMheTypeId);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    setHistoryRows(data || []);
+  }, [accountId, historyColleagueId, historyMheTypeId]);
+
   const submitRetrain = async () => {
     setNotice({ type: "", message: "" });
 
@@ -494,15 +644,17 @@ export default function MheTrainingSetup() {
 
     setLoading(true);
     try {
-      // mark existing record as EXPIRED (valid enum)
+      // mark existing record as EXPIRED
       const { error: expErr } = await supabase
         .from("colleague_mhe_authorisations")
         .update({ status: "EXPIRED" })
-        .eq("id", a.id);
+        .eq("id", a.id)
+        .eq("account_id", accountId);
 
       if (expErr) throw expErr;
 
       const payload = {
+        account_id: accountId,
         site_id: siteId,
         colleague_id: a.colleague_id,
         mhe_type_id: a.mhe_type_id,
@@ -528,26 +680,6 @@ export default function MheTrainingSetup() {
     }
   };
 
-  // ---------- History ----------
-  const refreshHistory = useCallback(async () => {
-    if (!historyColleagueId) {
-      setHistoryRows([]);
-      return;
-    }
-
-    let q = supabase
-      .from("colleague_mhe_authorisations")
-      .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path, notes, created_at")
-      .eq("colleague_id", historyColleagueId)
-      .order("trained_on", { ascending: false });
-
-    if (historyMheTypeId !== "ALL") q = q.eq("mhe_type_id", historyMheTypeId);
-
-    const { data, error } = await q;
-    if (error) throw error;
-    setHistoryRows(data || []);
-  }, [historyColleagueId, historyMheTypeId]);
-
   useEffect(() => {
     if (tab !== "history") return;
     (async () => {
@@ -567,12 +699,12 @@ export default function MheTrainingSetup() {
 
   // ---------- Render ----------
   return (
-    <AppLayout>
+    <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
       <div className="wi-page wi-mheTrainingPage">
         <div className="wi-pageHeader">
           <h1 className="wi-pageTitle">MHE training tracker</h1>
           <div className="wi-pageSubtitle">
-            Company enforced: <strong>{lockedCompanyName || "—"}</strong>
+            Company: <strong>{selectedCompanyName || "—"}</strong>
             {siteName ? (
               <>
                 {" "}
@@ -582,23 +714,49 @@ export default function MheTrainingSetup() {
           </div>
         </div>
 
-        {notice.message && (
-          <div className={`wi-alert wi-alert--${notice.type || "info"}`}>{notice.message}</div>
-        )}
+        {notice.message && <div className={`wi-alert wi-alert--${notice.type || "info"}`}>{notice.message}</div>}
+
+        <div className="wi-formGrid" style={{ marginBottom: 10 }}>
+          <div className="wi-field wi-span2">
+            <label className="wi-label">Company</label>
+            <select
+              className="wi-input"
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              disabled={loading || allowedCompanies.length <= 1}
+            >
+              <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+              {allowedCompanies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="wi-field wi-span2">
+            <label className="wi-label">Site</label>
+            <select
+              className="wi-input"
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+              disabled={loading || !companyId}
+            >
+              <option value="">{companyId ? "Select site…" : "Select a company first…"}</option>
+              {sitesForSelectedCompany.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         <div className="wi-tabsRow">
-          <button
-            className={`wi-tabPill ${tab === "register" ? "active" : ""}`}
-            onClick={() => setTab("register")}
-            type="button"
-          >
+          <button className={`wi-tabPill ${tab === "register" ? "active" : ""}`} onClick={() => setTab("register")} type="button">
             Training register
           </button>
-          <button
-            className={`wi-tabPill ${tab === "history" ? "active" : ""}`}
-            onClick={() => setTab("history")}
-            type="button"
-          >
+          <button className={`wi-tabPill ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")} type="button">
             Audit history
           </button>
         </div>
@@ -624,18 +782,6 @@ export default function MheTrainingSetup() {
             }
           >
             <div className="wi-formGrid">
-              <div className="wi-field wi-span2">
-                <label className="wi-label">Site</label>
-                <select className="wi-input" value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={loading}>
-                  <option value="">{lockedCompanyId ? "Select site…" : "Loading company…"}</option>
-                  {sitesForCompany.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <div className="wi-field">
                 <label className="wi-label">Search colleague</label>
                 <input
@@ -661,7 +807,9 @@ export default function MheTrainingSetup() {
             </div>
 
             <div className="wi-registerList">
-              {colleagueRows.length === 0 ? (
+              {!siteId ? (
+                <div className="wi-muted">Select a site to view training records.</div>
+              ) : colleagueRows.length === 0 ? (
                 <div className="wi-muted">No trained colleagues match the current filters.</div>
               ) : (
                 colleagueRows.map((c) => (
@@ -739,10 +887,8 @@ export default function MheTrainingSetup() {
                       <div key={a.id} className="wi-floatTip__row">
                         <div className="t">{a.mhe_type}</div>
                         <div className="d">
-                          Trained: <strong>{a.trained_on}</strong> • Next due:{" "}
-                          <strong>{a.expires_on || "—"}</strong> •{" "}
-                          <strong>{daysUntil(a.expires_on) ?? "—"}d</strong> • Cert:{" "}
-                          <strong>{a.certificate_path ? "Yes" : "No"}</strong>
+                          Trained: <strong>{a.trained_on}</strong> • Next due: <strong>{a.expires_on || "—"}</strong> •{" "}
+                          <strong>{daysUntil(a.expires_on) ?? "—"}d</strong> • Cert: <strong>{a.certificate_path ? "Yes" : "No"}</strong>
                         </div>
                       </div>
                     ))}
@@ -757,20 +903,13 @@ export default function MheTrainingSetup() {
           <Card title="Audit history" subtitle="Full training record per colleague (includes expired).">
             <div className="wi-formGrid">
               <div className="wi-field wi-span2">
-                <label className="wi-label">Site</label>
-                <select className="wi-input" value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={loading}>
-                  <option value="">{lockedCompanyId ? "Select site…" : "Loading company…"}</option>
-                  {sitesForCompany.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="wi-field wi-span2">
                 <label className="wi-label">Colleague</label>
-                <select className="wi-input" value={historyColleagueId} onChange={(e) => setHistoryColleagueId(e.target.value)} disabled={loading || !siteId}>
+                <select
+                  className="wi-input"
+                  value={historyColleagueId}
+                  onChange={(e) => setHistoryColleagueId(e.target.value)}
+                  disabled={loading || !siteId}
+                >
                   <option value="">{siteId ? "Select colleague…" : "Select site first…"}</option>
                   {siteColleagues.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -895,24 +1034,12 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field">
                     <label className="wi-label">Trained on</label>
-                    <input
-                      className="wi-input"
-                      type="date"
-                      value={addModal.trained_on}
-                      onChange={(e) => setAddModal((m) => ({ ...m, trained_on: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" type="date" value={addModal.trained_on} onChange={(e) => setAddModal((m) => ({ ...m, trained_on: e.target.value }))} disabled={loading} />
                   </div>
 
                   <div className="wi-field">
                     <label className="wi-label">Next training due</label>
-                    <input
-                      className="wi-input"
-                      type="date"
-                      value={addModal.expires_on}
-                      onChange={(e) => setAddModal((m) => ({ ...m, expires_on: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" type="date" value={addModal.expires_on} onChange={(e) => setAddModal((m) => ({ ...m, expires_on: e.target.value }))} disabled={loading} />
                   </div>
 
                   <div className="wi-field wi-span2">
@@ -927,12 +1054,7 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field wi-span2">
                     <label className="wi-label">Notes (optional)</label>
-                    <input
-                      className="wi-input"
-                      value={addModal.notes}
-                      onChange={(e) => setAddModal((m) => ({ ...m, notes: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" value={addModal.notes} onChange={(e) => setAddModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
                   </div>
                 </div>
               </div>
@@ -973,24 +1095,12 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field">
                     <label className="wi-label">Trained on</label>
-                    <input
-                      className="wi-input"
-                      type="date"
-                      value={retrainModal.trained_on}
-                      onChange={(e) => setRetrainModal((m) => ({ ...m, trained_on: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" type="date" value={retrainModal.trained_on} onChange={(e) => setRetrainModal((m) => ({ ...m, trained_on: e.target.value }))} disabled={loading} />
                   </div>
 
                   <div className="wi-field">
                     <label className="wi-label">Next training due</label>
-                    <input
-                      className="wi-input"
-                      type="date"
-                      value={retrainModal.expires_on}
-                      onChange={(e) => setRetrainModal((m) => ({ ...m, expires_on: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" type="date" value={retrainModal.expires_on} onChange={(e) => setRetrainModal((m) => ({ ...m, expires_on: e.target.value }))} disabled={loading} />
                   </div>
 
                   <div className="wi-field wi-span2">
@@ -1005,12 +1115,7 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field wi-span2">
                     <label className="wi-label">Notes (optional)</label>
-                    <input
-                      className="wi-input"
-                      value={retrainModal.notes}
-                      onChange={(e) => setRetrainModal((m) => ({ ...m, notes: e.target.value }))}
-                      disabled={loading}
-                    />
+                    <input className="wi-input" value={retrainModal.notes} onChange={(e) => setRetrainModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
                   </div>
                 </div>
               </div>

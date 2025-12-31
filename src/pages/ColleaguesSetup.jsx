@@ -1,43 +1,45 @@
 // /src/pages/ColleaguesSetup.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
 import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 import { supabase } from "../lib/supabaseClient";
+
 import Papa from "papaparse";
-
 import "./ColleaguesSetup.css";
-
-const CSV_HEADERS = [
-  "company_name",
-  "site_name",
-  "first_name",
-  "last_name",
-  "employment_type", // FULL_TIME | AGENCY
-  "employment_start_date", // required if FULL_TIME
-  "agency_name", // required if AGENCY
-  "agency_start_date", // required if AGENCY
-  "weeks_until_full_time", // optional
-  "emergency_contact_name", // optional
-  "emergency_contact_phone", // optional
-  "active", // optional true/false (default true)
-];
 
 const EMPLOYMENT_TYPES = [
   { value: "FULL_TIME", label: "Full Time" },
   { value: "AGENCY", label: "Agency" },
 ];
 
+const CSV_HEADERS = [
+  "company_name",
+  "site_name",
+  "first_name",
+  "last_name",
+  "employment_type",
+  "employment_start_date",
+  "agency_name",
+  "agency_start_date",
+  "weeks_until_full_time",
+  "emergency_contact_name",
+  "emergency_contact_phone",
+  "active",
+];
+
 function safeLower(v) {
   return (v ?? "").toString().trim().toLowerCase();
 }
 
-function parseBool(v, defaultValue = true) {
-  if (v === null || v === undefined || v === "") return defaultValue;
+function parseBool(v, def = true) {
+  if (v === null || v === undefined || v === "") return def;
   const s = String(v).trim().toLowerCase();
   if (["true", "t", "yes", "y", "1"].includes(s)) return true;
   if (["false", "f", "no", "n", "0"].includes(s)) return false;
-  return defaultValue;
+  return def;
 }
 
 function isValidYMD(ymd) {
@@ -63,8 +65,7 @@ function daysUntil(ymd) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dt = new Date(`${ymd}T00:00:00`);
-  const diff = dt.getTime() - today.getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  return Math.ceil((dt.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function downloadTextFile(filename, content) {
@@ -82,76 +83,87 @@ function csvEscape(v) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
+function activeFromPath(pathname) {
+  if (pathname.startsWith("/app/colleagues")) return "colleagues";
+  if (pathname.startsWith("/app/setup/mhe")) return "mhe-setup";
+  if (pathname.startsWith("/app/setup/companies-sites")) return "company-site-setup";
+  if (pathname.startsWith("/app/tools/scheduling")) return "scheduling-tool";
+  if (pathname.startsWith("/app/connections")) return "connections";
+  if (pathname.startsWith("/app/users")) return "users";
+  if (pathname.startsWith("/app/password")) return "password";
+  return "overview";
+}
+
+function pathFromKey(key) {
+  switch (key) {
+    case "overview":
+      return "/app/dashboard";
+    case "company-site-setup":
+      return "/app/setup/companies-sites";
+    case "mhe-setup":
+      return "/app/setup/mhe";
+    case "colleagues":
+      return "/app/colleagues";
+    case "connections":
+      return "/app/connections";
+    case "scheduling-tool":
+      return "/app/tools/scheduling";
+    case "users":
+      return "/app/users";
+    case "password":
+      return "/app/password";
+    default:
+      return "/app/dashboard";
+  }
+}
+
 export default function ColleaguesSetup() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const activeNav = useMemo(() => activeFromPath(location.pathname), [location.pathname]);
+
   const fileRef = useRef(null);
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState({ type: "", message: "" });
 
-  // Tabs (default to list)
-  const [tab, setTab] = useState("list"); // "list" | "add"
+  const [email, setEmail] = useState("");
+  const [accountId, setAccountId] = useState("");
 
-  // Reference data
   const [companies, setCompanies] = useState([]);
   const [sites, setSites] = useState([]);
 
-  // Locked company from company_users
-  const [lockedCompanyId, setLockedCompanyId] = useState("");
-  const [lockedCompanyName, setLockedCompanyName] = useState("");
+  // Multi-company enforcement:
+  // allowedCompanies = companies in this tenant that the user is a member of (via company_users)
+  const [allowedCompanies, setAllowedCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState(""); // selected company
 
-  // Selected site (shared across tabs)
   const [siteId, setSiteId] = useState("");
 
-  // Manual form fields
+  const [tab, setTab] = useState("list"); // list | add
+
+  // manual form
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [employmentType, setEmploymentType] = useState("FULL_TIME");
-
   const [employmentStartDate, setEmploymentStartDate] = useState("");
   const [agencyName, setAgencyName] = useState("");
   const [agencyStartDate, setAgencyStartDate] = useState("");
   const [weeksUntilFullTime, setWeeksUntilFullTime] = useState("");
-
   const [emergencyContactName, setEmergencyContactName] = useState("");
   const [emergencyContactPhone, setEmergencyContactPhone] = useState("");
   const [active, setActive] = useState(true);
 
-  // Colleagues list
   const [colleagues, setColleagues] = useState([]);
 
-  // Filters
+  // filters
   const [fName, setFName] = useState("");
   const [fType, setFType] = useState("ALL"); // ALL | FULL_TIME | AGENCY
   const [fAgency, setFAgency] = useState("");
   const [fStatus, setFStatus] = useState("ACTIVE"); // ACTIVE | DISABLED | ALL
   const [showDisabled, setShowDisabled] = useState(false);
 
-  // Floating tooltip
-  const [hoverTip, setHoverTip] = useState({
-    open: false,
-    x: 0,
-    y: 0,
-    colleague: null,
-  });
-
-  const moveHoverTip = (e, colleague) => {
-    const pad = 14;
-    const boxW = 380;
-    const boxH = 280;
-
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    let x = e.clientX + 14;
-    let y = e.clientY + 14;
-
-    if (x + boxW + pad > vw) x = e.clientX - boxW - 14;
-    if (y + boxH + pad > vh) y = e.clientY - boxH - 14;
-
-    setHoverTip({ open: true, x, y, colleague });
-  };
-
-  // Import state
+  // import
   const [importFileName, setImportFileName] = useState("");
   const [importPreview, setImportPreview] = useState([]);
   const [importErrors, setImportErrors] = useState([]);
@@ -159,69 +171,155 @@ export default function ColleaguesSetup() {
   const [importReadyCount, setImportReadyCount] = useState(0);
   const [importTotalCount, setImportTotalCount] = useState(0);
 
-  // Init: load companies & sites, lock company by company_users
+  const onSelectNav = (key) => navigate(pathFromKey(key));
+
+  const selectedCompanyName = useMemo(() => {
+    return (allowedCompanies || []).find((c) => c.id === companyId)?.name || "";
+  }, [allowedCompanies, companyId]);
+
+  const resolveAccountId = useCallback(async (userId) => {
+    // Primary: public.users
+    const { data: uRow, error: uErr } = await supabase
+      .from("users")
+      .select("account_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!uErr && uRow?.account_id) return uRow.account_id;
+
+    // Fallback: company_users
+    const { data: cuRow, error: cuErr } = await supabase
+      .from("company_users")
+      .select("account_id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!cuErr && cuRow?.account_id) return cuRow.account_id;
+
+    return "";
+  }, []);
+
+  const requireSession = useCallback(async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+
+    const user = data?.session?.user;
+    if (!user) {
+      navigate("/login", { replace: true });
+      return null;
+    }
+
+    setEmail(user.email || "");
+
+    if (!accountId) {
+      const aId = await resolveAccountId(user.id);
+      if (!aId) throw new Error("Could not resolve account_id for this user.");
+      setAccountId(aId);
+    }
+
+    return user;
+  }, [navigate, accountId, resolveAccountId]);
+
+  // bootstrap session
   useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setNotice({ type: "", message: "" });
+      try {
+        await requireSession();
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Auth initialisation failed." });
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // load tenant-scoped reference data + memberships (multi-company)
+  useEffect(() => {
+    if (!accountId) return;
+
     (async () => {
       setLoading(true);
       setNotice({ type: "", message: "" });
 
       try {
-        const [{ data: comp, error: ec }, { data: st, error: es }] = await Promise.all([
-          supabase.from("companies").select("id, name").order("name", { ascending: true }),
-          supabase.from("sites").select("id, company_id, name").order("name", { ascending: true }),
-        ]);
-        if (ec) throw ec;
-        if (es) throw es;
-
-        setCompanies(comp || []);
-        setSites(st || []);
-
         const { data: authData, error: authErr } = await supabase.auth.getUser();
         if (authErr) throw authErr;
 
         const userId = authData?.user?.id;
         if (!userId) throw new Error("No authenticated user found.");
 
-        const { data: cu, error: cuErr } = await supabase
+        const [{ data: comp, error: ec }, { data: st, error: es }] = await Promise.all([
+          supabase
+            .from("companies")
+            .select("id, name, account_id")
+            .eq("account_id", accountId)
+            .order("name", { ascending: true }),
+          supabase
+            .from("sites")
+            .select("id, company_id, name, code, account_id")
+            .eq("account_id", accountId)
+            .order("name", { ascending: true }),
+        ]);
+
+        if (ec) throw ec;
+        if (es) throw es;
+
+        setCompanies(comp || []);
+        setSites(st || []);
+
+        // Memberships: user can have multiple companies
+        const { data: cuRows, error: cuError } = await supabase
           .from("company_users")
-          .select("company_id")
+          .select("company_id, account_id")
           .eq("user_id", userId)
-          .single();
+          .eq("account_id", accountId);
 
-        if (cuErr) throw cuErr;
+        if (cuError) throw cuError;
 
-        const lcId = cu?.company_id;
-        if (!lcId) throw new Error("No company assigned to this user in company_users.");
+        const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
+        if (memberCompanyIds.size === 0) {
+          throw new Error("No companies assigned to this user in company_users for this account.");
+        }
 
-        setLockedCompanyId(lcId);
+        const allowed = (comp || []).filter((c) => memberCompanyIds.has(c.id));
+        if (allowed.length === 0) {
+          throw new Error("Your company memberships do not match any companies in this tenant.");
+        }
 
-        const c = (comp || []).find((x) => x.id === lcId);
-        setLockedCompanyName(c?.name || "");
+        setAllowedCompanies(allowed);
 
-        const firstSite = (st || []).find((s) => s.company_id === lcId);
-        setSiteId(firstSite?.id || "");
+        // pick existing company if still valid, else first allowed
+        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
       } catch (e) {
         setNotice({ type: "error", message: e?.message || "Failed to initialise Colleagues page." });
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [accountId]);
 
-  const sitesForCompany = useMemo(() => {
-    if (!lockedCompanyId) return [];
-    return (sites || []).filter((s) => s.company_id === lockedCompanyId);
-  }, [sites, lockedCompanyId]);
+  // When company changes, ensure siteId is valid for that company (or default to first)
+  useEffect(() => {
+    if (!companyId) {
+      setSiteId("");
+      return;
+    }
+    const companySites = (sites || []).filter((s) => s.company_id === companyId);
+    const firstSite = companySites[0];
+    setSiteId((prev) => (prev && companySites.some((x) => x.id === prev) ? prev : (firstSite?.id || "")));
+  }, [companyId, sites]);
 
-  const siteByNameForLockedCompany = useMemo(() => {
-    const map = new Map();
-    if (!lockedCompanyId) return map;
-    sitesForCompany.forEach((s) => map.set(safeLower(s.name), s));
-    return map;
-  }, [sitesForCompany, lockedCompanyId]);
+  const sitesForSelectedCompany = useMemo(() => {
+    if (!companyId) return [];
+    return (sites || []).filter((s) => s.company_id === companyId);
+  }, [sites, companyId]);
 
   const refreshColleagues = useCallback(async () => {
-    if (!siteId) {
+    if (!accountId || !siteId) {
       setColleagues([]);
       return;
     }
@@ -231,6 +329,7 @@ export default function ColleaguesSetup() {
       .select(
         [
           "id",
+          "account_id",
           "company_id",
           "site_id",
           "first_name",
@@ -247,12 +346,13 @@ export default function ColleaguesSetup() {
           "created_at",
         ].join(",")
       )
+      .eq("account_id", accountId)
       .eq("site_id", siteId)
       .order("last_name", { ascending: true });
 
     if (error) throw error;
     setColleagues(data || []);
-  }, [siteId]);
+  }, [accountId, siteId]);
 
   useEffect(() => {
     (async () => {
@@ -275,9 +375,72 @@ export default function ColleaguesSetup() {
     }
   }, [employmentType]);
 
+  const enrichedColleagues = useMemo(() => {
+    return (colleagues || []).map((c) => {
+      let conversion = c.full_time_conversion_date;
+      if (!conversion && c.employment_type === "AGENCY" && c.agency_start_date && c.weeks_until_full_time != null) {
+        conversion = addDays(c.agency_start_date, Number(c.weeks_until_full_time) * 7);
+      }
+      const dueInDays = conversion ? daysUntil(conversion) : null;
+      const dueSoon = dueInDays != null && dueInDays >= 0 && dueInDays <= 30;
+      return { ...c, _conversion_date: conversion, _due_in_days: dueInDays, _due_soon: dueSoon };
+    });
+  }, [colleagues]);
+
+  const activeCounts = useMemo(() => {
+    const activeRows = (colleagues || []).filter((c) => c.active === true);
+    return {
+      fullTime: activeRows.filter((c) => c.employment_type === "FULL_TIME").length,
+      agency: activeRows.filter((c) => c.employment_type === "AGENCY").length,
+      totalActive: activeRows.length,
+    };
+  }, [colleagues]);
+
+  const filteredAndSorted = useMemo(() => {
+    const nameNeedle = safeLower(fName);
+    const agencyNeedle = safeLower(fAgency);
+
+    let rows = enrichedColleagues;
+
+    if (!showDisabled) rows = rows.filter((r) => r.active === true);
+
+    if (fStatus === "ACTIVE") rows = rows.filter((r) => r.active === true);
+    if (fStatus === "DISABLED") rows = rows.filter((r) => r.active === false);
+
+    if (fType !== "ALL") rows = rows.filter((r) => r.employment_type === fType);
+
+    if (nameNeedle) {
+      rows = rows.filter((r) => {
+        const full = `${r.first_name || ""} ${r.last_name || ""}`.toLowerCase();
+        const rev = `${r.last_name || ""} ${r.first_name || ""}`.toLowerCase();
+        return full.includes(nameNeedle) || rev.includes(nameNeedle);
+      });
+    }
+
+    if (agencyNeedle) rows = rows.filter((r) => safeLower(r.agency_name).includes(agencyNeedle));
+
+    rows = [...rows].sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      if (a._due_soon !== b._due_soon) return a._due_soon ? -1 : 1;
+
+      if (a._due_soon && b._due_soon) {
+        const da = a._due_in_days ?? 999999;
+        const db = b._due_in_days ?? 999999;
+        if (da !== db) return da - db;
+      }
+
+      const ln = (a.last_name || "").localeCompare(b.last_name || "");
+      if (ln !== 0) return ln;
+      return (a.first_name || "").localeCompare(b.first_name || "");
+    });
+
+    return rows;
+  }, [enrichedColleagues, fName, fType, fAgency, fStatus, showDisabled]);
+
   const manualFormErrors = useMemo(() => {
     const errs = [];
-    if (!lockedCompanyId) errs.push("Company is not assigned to this user (company_users).");
+    if (!accountId) errs.push("Account is not resolved for this user.");
+    if (!companyId) errs.push("Company is required.");
     if (!siteId) errs.push("Site is required.");
     if (!firstName.trim()) errs.push("First name is required.");
     if (!lastName.trim()) errs.push("Last name is required.");
@@ -302,7 +465,8 @@ export default function ColleaguesSetup() {
 
     return errs;
   }, [
-    lockedCompanyId,
+    accountId,
+    companyId,
     siteId,
     firstName,
     lastName,
@@ -324,7 +488,8 @@ export default function ColleaguesSetup() {
     setLoading(true);
     try {
       const payload = {
-        company_id: lockedCompanyId,
+        account_id: accountId,
+        company_id: companyId,
         site_id: siteId,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
@@ -370,18 +535,18 @@ export default function ColleaguesSetup() {
   async function handleToggleActive(colleague) {
     setNotice({ type: "", message: "" });
     setLoading(true);
-
     try {
       const next = !colleague.active;
-      const { error } = await supabase.from("colleagues").update({ active: next }).eq("id", colleague.id);
+
+      const { error } = await supabase
+        .from("colleagues")
+        .update({ active: next })
+        .eq("id", colleague.id)
+        .eq("account_id", accountId);
+
       if (error) throw error;
 
       setColleagues((prev) => prev.map((c) => (c.id === colleague.id ? { ...c, active: next } : c)));
-
-      // If tooltip is currently open for this colleague, update it too
-      setHoverTip((ht) =>
-        ht.open && ht.colleague?.id === colleague.id ? { ...ht, colleague: { ...ht.colleague, active: next } } : ht
-      );
     } catch (e) {
       setNotice({ type: "error", message: e?.message || "Failed to update status." });
     } finally {
@@ -389,81 +554,9 @@ export default function ColleaguesSetup() {
     }
   }
 
-  // Add computed conversion/dueSoon metadata
-  const enrichedColleagues = useMemo(() => {
-    return (colleagues || []).map((c) => {
-      let conversion = c.full_time_conversion_date;
-      if (!conversion && c.employment_type === "AGENCY" && c.agency_start_date && c.weeks_until_full_time != null) {
-        conversion = addDays(c.agency_start_date, Number(c.weeks_until_full_time) * 7);
-      }
-      const dueInDays = conversion ? daysUntil(conversion) : null;
-      const dueSoon = dueInDays != null && dueInDays >= 0 && dueInDays <= 30;
-      return { ...c, _conversion_date: conversion, _due_in_days: dueInDays, _due_soon: dueSoon };
-    });
-  }, [colleagues]);
-
-  const activeCounts = useMemo(() => {
-    const activeRows = (colleagues || []).filter((c) => c.active === true);
-    const fullTime = activeRows.filter((c) => c.employment_type === "FULL_TIME").length;
-    const agency = activeRows.filter((c) => c.employment_type === "AGENCY").length;
-    return { fullTime, agency, totalActive: activeRows.length };
-  }, [colleagues]);
-
-  const filteredAndSorted = useMemo(() => {
-    const nameNeedle = safeLower(fName);
-    const agencyNeedle = safeLower(fAgency);
-
-    let rows = enrichedColleagues;
-
-    // default hide disabled unless explicitly shown
-    if (!showDisabled) rows = rows.filter((r) => r.active === true);
-
-    // status filter
-    if (fStatus === "ACTIVE") rows = rows.filter((r) => r.active === true);
-    if (fStatus === "DISABLED") rows = rows.filter((r) => r.active === false);
-
-    // type filter
-    if (fType !== "ALL") rows = rows.filter((r) => r.employment_type === fType);
-
-    // name filter
-    if (nameNeedle) {
-      rows = rows.filter((r) => {
-        const full = `${r.first_name || ""} ${r.last_name || ""}`.toLowerCase();
-        const rev = `${r.last_name || ""} ${r.first_name || ""}`.toLowerCase();
-        return full.includes(nameNeedle) || rev.includes(nameNeedle);
-      });
-    }
-
-    // agency filter
-    if (agencyNeedle) rows = rows.filter((r) => safeLower(r.agency_name).includes(agencyNeedle));
-
-    // Sort:
-    // 1) active first (disabled at bottom)
-    // 2) due soon (within 30 days) at top (red)
-    // 3) earlier due date first
-    // 4) last name, first name
-    rows = [...rows].sort((a, b) => {
-      if (a.active !== b.active) return a.active ? -1 : 1;
-      if (a._due_soon !== b._due_soon) return a._due_soon ? -1 : 1;
-
-      if (a._due_soon && b._due_soon) {
-        const da = a._due_in_days ?? 999999;
-        const db = b._due_in_days ?? 999999;
-        if (da !== db) return da - db;
-      }
-
-      const ln = (a.last_name || "").localeCompare(b.last_name || "");
-      if (ln !== 0) return ln;
-      return (a.first_name || "").localeCompare(b.first_name || "");
-    });
-
-    return rows;
-  }, [enrichedColleagues, fName, fType, fAgency, fStatus, showDisabled]);
-
-  // Export (respects filters)
   const handleExport = () => {
     const rows = filteredAndSorted;
-    const siteName = sitesForCompany.find((s) => s.id === siteId)?.name || "";
+    const siteName = sitesForSelectedCompany.find((s) => s.id === siteId)?.name || "";
 
     const headers = [
       "company_name",
@@ -488,7 +581,7 @@ export default function ColleaguesSetup() {
     rows.forEach((c) => {
       const conversion = c._conversion_date || "";
       const line = [
-        lockedCompanyName,
+        selectedCompanyName,
         siteName,
         c.first_name,
         c.last_name,
@@ -508,18 +601,15 @@ export default function ColleaguesSetup() {
       lines.push(line);
     });
 
-    const fn = `colleagues_export_${lockedCompanyName}_${siteName}`.replace(/\s+/g, "_") + ".csv";
+    const fn = `colleagues_export_${selectedCompanyName}_${siteName}`.replace(/\s+/g, "_") + ".csv";
     downloadTextFile(fn, lines.join("\n"));
   };
 
-  // -------------------- CSV IMPORT --------------------
   const validateImportRows = useCallback(
     (rows) => {
       const errors = [];
       const warnings = [];
       const preview = [];
-
-      const headerSet = new Set(CSV_HEADERS);
 
       if (!rows.length) {
         errors.push("No data rows found in CSV.");
@@ -528,12 +618,12 @@ export default function ColleaguesSetup() {
 
       const foundHeaders = Object.keys(rows[0] || {});
       const missing = CSV_HEADERS.filter((h) => !foundHeaders.includes(h));
-      const extra = foundHeaders.filter((h) => h && !headerSet.has(h));
-
       if (missing.length) errors.push(`CSV is missing required header(s): ${missing.join(", ")}`);
-      if (extra.length) warnings.push(`CSV has extra column(s) that will be ignored: ${extra.join(", ")}`);
 
       let readyCount = 0;
+
+      const siteByName = new Map();
+      sitesForSelectedCompany.forEach((s) => siteByName.set(safeLower(s.name), s));
 
       rows.forEach((r, idx) => {
         const rowNum = idx + 2;
@@ -542,7 +632,6 @@ export default function ColleaguesSetup() {
 
         const companyName = (r.company_name ?? "").toString().trim();
         const siteName = (r.site_name ?? "").toString().trim();
-
         const fn = (r.first_name ?? "").toString().trim();
         const ln = (r.last_name ?? "").toString().trim();
         const et = (r.employment_type ?? "").toString().trim().toUpperCase();
@@ -557,8 +646,6 @@ export default function ColleaguesSetup() {
 
         const activeVal = parseBool(r.active, true);
 
-        if (!lockedCompanyId) rowErrors.push("No company assigned to this user (company_users).");
-
         if (!companyName) rowErrors.push("company_name is required.");
         if (!siteName) rowErrors.push("site_name is required.");
         if (!fn) rowErrors.push("first_name is required.");
@@ -566,16 +653,13 @@ export default function ColleaguesSetup() {
         if (!et) rowErrors.push("employment_type is required.");
         if (et && et !== "FULL_TIME" && et !== "AGENCY") rowErrors.push("employment_type must be FULL_TIME or AGENCY.");
 
-        // Enforce company_name equals locked company
-        if (lockedCompanyName && companyName && safeLower(companyName) !== safeLower(lockedCompanyName)) {
-          rowErrors.push(`company_name must be "${lockedCompanyName}".`);
+        if (selectedCompanyName && companyName && safeLower(companyName) !== safeLower(selectedCompanyName)) {
+          rowErrors.push(`company_name must be "${selectedCompanyName}".`);
         }
 
-        // Resolve site within locked company
-        const site = siteName ? siteByNameForLockedCompany.get(safeLower(siteName)) : null;
-        if (siteName && !site) rowErrors.push(`site_name not found for company "${lockedCompanyName}": "${siteName}".`);
+        const site = siteName ? siteByName.get(safeLower(siteName)) : null;
+        if (siteName && !site) rowErrors.push(`site_name not found for company "${selectedCompanyName}": "${siteName}".`);
 
-        // Conditional rules
         if (et === "FULL_TIME") {
           if (!empStart) rowErrors.push("employment_start_date is required for FULL_TIME.");
           else if (!isValidYMD(empStart)) rowErrors.push("employment_start_date must be YYYY-MM-DD.");
@@ -591,7 +675,6 @@ export default function ColleaguesSetup() {
           else if (!isValidYMD(agStart)) rowErrors.push("agency_start_date must be YYYY-MM-DD.");
 
           if (empStart) rowWarnings.push("employment_start_date provided but employment_type is AGENCY (ignored).");
-
           if (weeks) {
             const n = Number(weeks);
             if (Number.isNaN(n)) rowErrors.push("weeks_until_full_time must be a number if provided.");
@@ -605,11 +688,7 @@ export default function ColleaguesSetup() {
         preview.push({
           _row: rowNum,
           _ok: ok,
-          _company_id: lockedCompanyId || null,
           _site_id: site?.id || null,
-
-          company_name: companyName,
-          site_name: siteName,
           first_name: fn,
           last_name: ln,
           employment_type: et,
@@ -620,7 +699,6 @@ export default function ColleaguesSetup() {
           emergency_contact_name: ecName || "",
           emergency_contact_phone: ecPhone || "",
           active: activeVal,
-
           _errors: rowErrors,
           _warnings: rowWarnings,
         });
@@ -631,12 +709,12 @@ export default function ColleaguesSetup() {
 
       return { errors, warnings, preview, readyCount, total: rows.length };
     },
-    [lockedCompanyId, lockedCompanyName, siteByNameForLockedCompany]
+    [sitesForSelectedCompany, selectedCompanyName]
   );
 
   const handleDownloadTemplate = () => {
     const exampleRow = [
-      lockedCompanyName || "Your Company",
+      selectedCompanyName || "Your Company",
       "Example Site",
       "John",
       "Smith",
@@ -649,19 +727,11 @@ export default function ColleaguesSetup() {
       "",
       "true",
     ];
-
-    const csv = [
-      CSV_HEADERS.join(","),
-      exampleRow.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
-    ].join("\n");
-
+    const csv = [CSV_HEADERS.join(","), exampleRow.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")].join("\n");
     downloadTextFile("colleagues_import_template.csv", csv);
   };
 
-  const handlePickFile = () => {
-    setNotice({ type: "", message: "" });
-    fileRef.current?.click();
-  };
+  const handlePickFile = () => fileRef.current?.click();
 
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
@@ -677,7 +747,6 @@ export default function ColleaguesSetup() {
     setLoading(true);
     try {
       const text = await file.text();
-
       const parsed = Papa.parse(text, {
         header: true,
         skipEmptyLines: true,
@@ -689,13 +758,11 @@ export default function ColleaguesSetup() {
         return;
       }
 
-      const rows = (parsed.data || []).filter((r) => {
-        const values = Object.values(r || {}).map((v) => String(v ?? "").trim());
-        return values.some((v) => v.length > 0);
-      });
+      const rows = (parsed.data || []).filter((r) =>
+        Object.values(r || {}).some((v) => String(v ?? "").trim().length > 0)
+      );
 
       const { errors, warnings, preview, readyCount, total } = validateImportRows(rows);
-
       setImportErrors(errors);
       setImportWarnings(warnings);
       setImportPreview(preview);
@@ -715,7 +782,6 @@ export default function ColleaguesSetup() {
 
   const handleImport = async () => {
     setNotice({ type: "", message: "" });
-
     if (!canImport) {
       setNotice({ type: "error", message: "Fix import errors before importing." });
       return;
@@ -725,9 +791,9 @@ export default function ColleaguesSetup() {
     try {
       const payloads = importPreview.map((r) => {
         const et = r.employment_type;
-
         return {
-          company_id: r._company_id,
+          account_id: accountId,
+          company_id: companyId,
           site_id: r._site_id,
           first_name: r.first_name,
           last_name: r.last_name,
@@ -738,23 +804,19 @@ export default function ColleaguesSetup() {
           emergency_contact_phone: r.emergency_contact_phone ? r.emergency_contact_phone : null,
 
           employment_start_date: et === "FULL_TIME" ? r.employment_start_date : null,
-
           agency_name: et === "AGENCY" ? (r.agency_name || null) : null,
           agency_start_date: et === "AGENCY" ? (r.agency_start_date || null) : null,
-          weeks_until_full_time:
-            et === "AGENCY" && r.weeks_until_full_time !== "" ? Number(r.weeks_until_full_time) : null,
+          weeks_until_full_time: et === "AGENCY" && r.weeks_until_full_time !== "" ? Number(r.weeks_until_full_time) : null,
         };
       });
 
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
-        const batch = payloads.slice(i, i + BATCH_SIZE);
-        const { error } = await supabase.from("colleagues").insert(batch);
+      const BATCH = 200;
+      for (let i = 0; i < payloads.length; i += BATCH) {
+        const { error } = await supabase.from("colleagues").insert(payloads.slice(i, i + BATCH));
         if (error) throw error;
       }
 
-      setNotice({ type: "success", message: `Imported ${payloads.length} colleague(s) successfully.` });
-
+      setNotice({ type: "success", message: `Imported ${payloads.length} colleague(s).` });
       setImportFileName("");
       setImportPreview([]);
       setImportErrors([]);
@@ -771,272 +833,181 @@ export default function ColleaguesSetup() {
     }
   };
 
-  // Tooltip content helper
-  const tooltipData = useMemo(() => {
-    if (!hoverTip.open || !hoverTip.colleague) return null;
-
-    const c = hoverTip.colleague;
-    const siteName = sitesForCompany.find((s) => s.id === c.site_id)?.name || "";
-
-    const conversion =
-      c.full_time_conversion_date ||
-      (c.employment_type === "AGENCY" && c.agency_start_date && c.weeks_until_full_time != null
-        ? addDays(c.agency_start_date, Number(c.weeks_until_full_time) * 7)
-        : null);
-
-    const due = conversion ? daysUntil(conversion) : null;
-
-    return { c, siteName, conversion, due };
-  }, [hoverTip.open, hoverTip.colleague, sitesForCompany]);
-
-  // -------------------- UI --------------------
   return (
-    <AppLayout>
+    <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
       <div className="wi-page wi-colleaguesPage">
         <div className="wi-pageHeader">
           <h1 className="wi-pageTitle">Colleagues</h1>
-          <div className="wi-pageSubtitle">
-            Company enforced: <strong>{lockedCompanyName || "—"}</strong>
+          <div className="wi-pageSubtitle" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span>Company:</span>
+            <select
+              className="wi-input"
+              style={{ maxWidth: 420 }}
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              disabled={loading || allowedCompanies.length <= 1}
+            >
+              <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+              {allowedCompanies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {notice.message && (
-          <div className={`wi-alert wi-alert--${notice.type || "info"}`}>{notice.message}</div>
-        )}
+        {notice.message && <div className={`wi-alert wi-alert--${notice.type || "info"}`}>{notice.message}</div>}
 
         <div className="wi-tabsRow">
-          <button
-            className={`wi-tabPill ${tab === "list" ? "active" : ""}`}
-            onClick={() => setTab("list")}
-            type="button"
-          >
+          <button className={`wi-tabPill ${tab === "list" ? "active" : ""}`} onClick={() => setTab("list")} type="button">
             Colleague list
           </button>
-          <button
-            className={`wi-tabPill ${tab === "add" ? "active" : ""}`}
-            onClick={() => setTab("add")}
-            type="button"
-          >
+          <button className={`wi-tabPill ${tab === "add" ? "active" : ""}`} onClick={() => setTab("add")} type="button">
             Add / Import
           </button>
         </div>
 
-        {/* LIST TAB */}
         {tab === "list" && (
-          <div className="wi-colleaguesGrid">
-            <Card
-              title="Colleague list"
-              subtitle="Agency conversions due within 30 days are prioritised and highlighted."
-              actions={
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Button variant="primary" onClick={refreshColleagues} disabled={loading}>
-                    Refresh
-                  </Button>
-                </div>
-              }
-            >
-              <div className="wi-formGrid">
-                <div className="wi-field wi-span2">
-                  <label className="wi-label">Site</label>
-                  <select
-                    className="wi-input"
-                    value={siteId}
-                    onChange={(e) => {
-                      setSiteId(e.target.value);
-                      setHoverTip({ open: false, x: 0, y: 0, colleague: null });
-                    }}
-                    disabled={loading || !lockedCompanyId}
-                  >
-                    <option value="">{lockedCompanyId ? "Select site…" : "Loading company…"}</option>
-                    {sitesForCompany.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="wi-field">
-                  <label className="wi-label">Name filter</label>
-                  <input className="wi-input" value={fName} onChange={(e) => setFName(e.target.value)} />
-                </div>
-
-                <div className="wi-field">
-                  <label className="wi-label">Type</label>
-                  <select className="wi-input" value={fType} onChange={(e) => setFType(e.target.value)}>
-                    <option value="ALL">All</option>
-                    <option value="FULL_TIME">Full time</option>
-                    <option value="AGENCY">Agency</option>
-                  </select>
-                </div>
-
-                <div className="wi-field">
-                  <label className="wi-label">Agency filter</label>
-                  <input
-                    className="wi-input"
-                    value={fAgency}
-                    onChange={(e) => setFAgency(e.target.value)}
-                    placeholder="Agency name…"
-                  />
-                </div>
-
-                <div className="wi-field">
-                  <label className="wi-label">Status</label>
-                  <select className="wi-input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-                    <option value="ACTIVE">Active only</option>
-                    <option value="DISABLED">Disabled only</option>
-                    <option value="ALL">All</option>
-                  </select>
-                </div>
-
-                <div className="wi-field wi-span2 wi-checkboxRow">
-                  <input
-                    id="showDisabled"
-                    type="checkbox"
-                    checked={showDisabled}
-                    onChange={(e) => setShowDisabled(e.target.checked)}
-                  />
-                  <label htmlFor="showDisabled">Show disabled colleagues (otherwise hidden)</label>
-                </div>
-              </div>
-
-              <div className="wi-metricsRow">
-                <div className="wi-metricCard">
-                  <div className="wi-metricLabel">Active full time</div>
-                  <div className="wi-metricValue">{activeCounts.fullTime}</div>
-                </div>
-                <div className="wi-metricCard">
-                  <div className="wi-metricLabel">Active agency</div>
-                  <div className="wi-metricValue">{activeCounts.agency}</div>
-                </div>
-                <div className="wi-metricCard">
-                  <div className="wi-metricLabel">Total active</div>
-                  <div className="wi-metricValue">{activeCounts.totalActive}</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 6 }}>
-                {siteId && filteredAndSorted.length === 0 ? (
-                  <div className="wi-muted">No colleagues match your filters.</div>
-                ) : (
-                  <div className="wi-tableWrap">
-                    <table className="wi-table">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Type</th>
-                          <th>Agency</th>
-                          <th>Start date</th>
-                          <th>Agency start</th>
-                          <th>Conversion</th>
-                          <th>Status</th>
-                          <th style={{ width: 140 }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredAndSorted.map((c) => {
-                          const startDate = c.employment_type === "FULL_TIME" ? c.employment_start_date : "";
-                          const conversion = c._conversion_date || "";
-                          const dueLabel =
-                            c._due_soon && c._due_in_days != null ? `Due in ${c._due_in_days} day(s)` : "";
-
-                          return (
-                            <tr
-                              key={c.id}
-                              className={`${c._due_soon ? "wi-rowDueSoon" : ""} ${c.active ? "" : "wi-rowDisabled"}`}
-                              onMouseEnter={(e) => moveHoverTip(e, c)}
-                              onMouseMove={(e) => moveHoverTip(e, c)}
-                              onMouseLeave={() => setHoverTip({ open: false, x: 0, y: 0, colleague: null })}
-                            >
-                              <td>
-                                {c.last_name}, {c.first_name}
-                                {dueLabel && <div className="wi-rowHint">{dueLabel}</div>}
-                              </td>
-                              <td>{c.employment_type}</td>
-                              <td>{c.agency_name || "—"}</td>
-                              <td>{startDate || "—"}</td>
-                              <td>{c.agency_start_date || "—"}</td>
-                              <td>{conversion || "—"}</td>
-                              <td>{c.active ? "Active" : "Disabled"}</td>
-                              <td>
-                                <Button variant="primary" onClick={() => handleToggleActive(c)} disabled={loading}>
-                                  {c.active ? "Disable" : "Activate"}
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Floating tooltip */}
-              {tooltipData && (
-                <div className="wi-floatTip" style={{ left: hoverTip.x, top: hoverTip.y }}>
-                  <div className="wi-floatTip__title">
-                    {tooltipData.c.first_name} {tooltipData.c.last_name}
-                  </div>
-
-                  <div className="wi-floatTip__grid">
-                    <div className="k">Site</div>
-                    <div className="v">{tooltipData.siteName || "—"}</div>
-
-                    <div className="k">Type</div>
-                    <div className="v">{tooltipData.c.employment_type}</div>
-
-                    <div className="k">Emp start</div>
-                    <div className="v">{tooltipData.c.employment_start_date || "—"}</div>
-
-                    <div className="k">Agency</div>
-                    <div className="v">{tooltipData.c.agency_name || "—"}</div>
-
-                    <div className="k">Agency start</div>
-                    <div className="v">{tooltipData.c.agency_start_date || "—"}</div>
-
-                    <div className="k">Weeks → FT</div>
-                    <div className="v">{tooltipData.c.weeks_until_full_time ?? "—"}</div>
-
-                    <div className="k">Conversion</div>
-                    <div className="v">
-                      {tooltipData.conversion || "—"}
-                      {tooltipData.due != null ? ` (in ${tooltipData.due}d)` : ""}
-                    </div>
-
-                    <div className="k">Emergency</div>
-                    <div className="v">{tooltipData.c.emergency_contact_name || "—"}</div>
-
-                    <div className="k">Phone</div>
-                    <div className="v">{tooltipData.c.emergency_contact_phone || "—"}</div>
-
-                    <div className="k">Status</div>
-                    <div className="v">{tooltipData.c.active ? "Active" : "Disabled"}</div>
-                  </div>
-                </div>
-              )}
-            </Card>
-
-            {/* Right side: Export (separate visual box) */}
-            <div className="wi-rightStack">
-              <Card title="Export" subtitle="Export the currently filtered list to CSV.">
-                <div className="wi-muted" style={{ marginBottom: 10 }}>
-                  Export respects your filters. For “all colleagues”, set Status = All and tick Show disabled.
-                </div>
+          <Card
+            title="Colleague list"
+            subtitle="Agency conversions due within 30 days are prioritised."
+            actions={
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Button variant="primary" onClick={refreshColleagues} disabled={loading || !siteId}>
+                  Refresh
+                </Button>
                 <Button variant="primary" onClick={handleExport} disabled={loading || !siteId}>
                   Export CSV
                 </Button>
-              </Card>
+              </div>
+            }
+          >
+            <div className="wi-formGrid">
+              <div className="wi-field wi-span2">
+                <label className="wi-label">Site</label>
+                <select
+                  className="wi-input"
+                  value={siteId}
+                  onChange={(e) => setSiteId(e.target.value)}
+                  disabled={loading || !companyId}
+                >
+                  <option value="">{companyId ? "Select site…" : "Select a company…"}</option>
+                  {sitesForSelectedCompany.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Name filter</label>
+                <input className="wi-input" value={fName} onChange={(e) => setFName(e.target.value)} />
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Type</label>
+                <select className="wi-input" value={fType} onChange={(e) => setFType(e.target.value)}>
+                  <option value="ALL">All</option>
+                  <option value="FULL_TIME">Full time</option>
+                  <option value="AGENCY">Agency</option>
+                </select>
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Agency filter</label>
+                <input className="wi-input" value={fAgency} onChange={(e) => setFAgency(e.target.value)} placeholder="Agency name…" />
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Status</label>
+                <select className="wi-input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+                  <option value="ACTIVE">Active only</option>
+                  <option value="DISABLED">Disabled only</option>
+                  <option value="ALL">All</option>
+                </select>
+              </div>
+
+              <div className="wi-field wi-span2 wi-checkboxRow">
+                <input id="showDisabled" type="checkbox" checked={showDisabled} onChange={(e) => setShowDisabled(e.target.checked)} />
+                <label htmlFor="showDisabled">Show disabled colleagues (otherwise hidden)</label>
+              </div>
             </div>
-          </div>
+
+            <div className="wi-metricsRow">
+              <div className="wi-metricCard">
+                <div className="wi-metricLabel">Active full time</div>
+                <div className="wi-metricValue">{activeCounts.fullTime}</div>
+              </div>
+              <div className="wi-metricCard">
+                <div className="wi-metricLabel">Active agency</div>
+                <div className="wi-metricValue">{activeCounts.agency}</div>
+              </div>
+              <div className="wi-metricCard">
+                <div className="wi-metricLabel">Total active</div>
+                <div className="wi-metricValue">{activeCounts.totalActive}</div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 6 }}>
+              {!siteId ? (
+                <div className="wi-muted">Select a site to view colleagues.</div>
+              ) : filteredAndSorted.length === 0 ? (
+                <div className="wi-muted">No colleagues match your filters.</div>
+              ) : (
+                <div className="wi-tableWrap">
+                  <table className="wi-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Agency</th>
+                        <th>Start date</th>
+                        <th>Agency start</th>
+                        <th>Conversion</th>
+                        <th>Status</th>
+                        <th style={{ width: 140 }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAndSorted.map((c) => {
+                        const startDate = c.employment_type === "FULL_TIME" ? c.employment_start_date : "";
+                        const conversion = c._conversion_date || "";
+                        const dueLabel = c._due_soon && c._due_in_days != null ? `Due in ${c._due_in_days} day(s)` : "";
+                        return (
+                          <tr key={c.id} className={`${c._due_soon ? "wi-rowDueSoon" : ""} ${c.active ? "" : "wi-rowDisabled"}`}>
+                            <td>
+                              {c.last_name}, {c.first_name}
+                              {dueLabel && <div className="wi-rowHint">{dueLabel}</div>}
+                            </td>
+                            <td>{c.employment_type}</td>
+                            <td>{c.agency_name || "—"}</td>
+                            <td>{startDate || "—"}</td>
+                            <td>{c.agency_start_date || "—"}</td>
+                            <td>{conversion || "—"}</td>
+                            <td>{c.active ? "Active" : "Disabled"}</td>
+                            <td>
+                              <Button variant="primary" onClick={() => handleToggleActive(c)} disabled={loading}>
+                                {c.active ? "Disable" : "Activate"}
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Card>
         )}
 
-        {/* ADD / IMPORT TAB */}
         {tab === "add" && (
           <div className="wi-colleaguesGrid">
             <Card
               title="Add colleague"
-              subtitle="Company is enforced from the logged-in user."
+              subtitle="Company and sites are limited to your memberships."
               actions={
                 <Button variant="primary" onClick={handleCreateManual} disabled={loading}>
                   {loading ? "Saving…" : "Create colleague"}
@@ -1046,19 +1017,26 @@ export default function ColleaguesSetup() {
               <div className="wi-formGrid">
                 <div className="wi-field wi-span2">
                   <label className="wi-label">Company</label>
-                  <input className="wi-input" value={lockedCompanyName || "—"} disabled />
+                  <select
+                    className="wi-input"
+                    value={companyId}
+                    onChange={(e) => setCompanyId(e.target.value)}
+                    disabled={loading || allowedCompanies.length <= 1}
+                  >
+                    <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+                    {allowedCompanies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="wi-field wi-span2">
                   <label className="wi-label">Site</label>
-                  <select
-                    className="wi-input"
-                    value={siteId}
-                    onChange={(e) => setSiteId(e.target.value)}
-                    disabled={loading || !lockedCompanyId}
-                  >
-                    <option value="">{lockedCompanyId ? "Select site…" : "Loading company…"}</option>
-                    {sitesForCompany.map((s) => (
+                  <select className="wi-input" value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={loading || !companyId}>
+                    <option value="">{companyId ? "Select site…" : "Select a company…"}</option>
+                    {sitesForSelectedCompany.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
                       </option>
@@ -1098,13 +1076,7 @@ export default function ColleaguesSetup() {
                 {employmentType === "FULL_TIME" && (
                   <div className="wi-field wi-span2">
                     <label className="wi-label">Employment start date</label>
-                    <input
-                      type="date"
-                      className="wi-input"
-                      value={employmentStartDate}
-                      onChange={(e) => setEmploymentStartDate(e.target.value)}
-                      disabled={loading}
-                    />
+                    <input type="date" className="wi-input" value={employmentStartDate} onChange={(e) => setEmploymentStartDate(e.target.value)} disabled={loading} />
                   </div>
                 )}
 
@@ -1117,27 +1089,12 @@ export default function ColleaguesSetup() {
 
                     <div className="wi-field">
                       <label className="wi-label">Agency start date</label>
-                      <input
-                        type="date"
-                        className="wi-input"
-                        value={agencyStartDate}
-                        onChange={(e) => setAgencyStartDate(e.target.value)}
-                        disabled={loading}
-                      />
+                      <input type="date" className="wi-input" value={agencyStartDate} onChange={(e) => setAgencyStartDate(e.target.value)} disabled={loading} />
                     </div>
 
                     <div className="wi-field">
                       <label className="wi-label">Weeks until full time</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="wi-input"
-                        value={weeksUntilFullTime}
-                        onChange={(e) => setWeeksUntilFullTime(e.target.value)}
-                        disabled={loading}
-                        placeholder="e.g. 12"
-                      />
-                      <div className="wi-helper">Conversion date is calculated automatically in the database.</div>
+                      <input type="number" min="0" className="wi-input" value={weeksUntilFullTime} onChange={(e) => setWeeksUntilFullTime(e.target.value)} disabled={loading} />
                     </div>
                   </>
                 )}
@@ -1172,22 +1129,16 @@ export default function ColleaguesSetup() {
               subtitle="Download the template, complete it, then upload the CSV to import."
               actions={
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Button variant="primary" onClick={handleDownloadTemplate} disabled={loading || !lockedCompanyId}>
+                  <Button variant="primary" onClick={handleDownloadTemplate} disabled={loading || !companyId}>
                     Download template
                   </Button>
-                  <Button variant="primary" onClick={handlePickFile} disabled={loading || !lockedCompanyId}>
+                  <Button variant="primary" onClick={handlePickFile} disabled={loading || !companyId}>
                     Upload CSV
                   </Button>
                 </div>
               }
             >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: "none" }}
-                onChange={handleFileChange}
-              />
+              <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleFileChange} />
 
               <div className="wi-importMeta">
                 <div>
@@ -1195,14 +1146,8 @@ export default function ColleaguesSetup() {
                   <div className="wi-helper">{importFileName || "No file selected"}</div>
                 </div>
                 <div>
-                  <div className="wi-muted">Company enforced</div>
-                  <div className="wi-helper">{lockedCompanyName || "—"}</div>
-                </div>
-                <div>
                   <div className="wi-muted">Validation</div>
-                  <div className="wi-helper">
-                    {importTotalCount === 0 ? "No rows loaded" : `${importReadyCount}/${importTotalCount} rows valid`}
-                  </div>
+                  <div className="wi-helper">{importTotalCount === 0 ? "No rows loaded" : `${importReadyCount}/${importTotalCount} rows valid`}</div>
                 </div>
               </div>
 
@@ -1217,9 +1162,7 @@ export default function ColleaguesSetup() {
                         {w}
                       </li>
                     ))}
-                    {importWarnings.length > 8 && (
-                      <li className="wi-helper">…and {importWarnings.length - 8} more</li>
-                    )}
+                    {importWarnings.length > 8 && <li className="wi-helper">…and {importWarnings.length - 8} more</li>}
                   </ul>
                 </div>
               )}
@@ -1241,40 +1184,6 @@ export default function ColleaguesSetup() {
                       </li>
                     )}
                   </ul>
-                </div>
-              )}
-
-              {importPreview.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div className="wi-muted" style={{ marginBottom: 6 }}>
-                    Preview (first 20 rows)
-                  </div>
-                  <div className="wi-tableWrap">
-                    <table className="wi-table">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          <th>Site</th>
-                          <th>Name</th>
-                          <th>Type</th>
-                          <th>Valid</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importPreview.slice(0, 20).map((r) => (
-                          <tr key={r._row} style={r._ok ? undefined : { background: "#fff7f7" }}>
-                            <td>{r._row}</td>
-                            <td>{r.site_name}</td>
-                            <td>
-                              {r.last_name}, {r.first_name}
-                            </td>
-                            <td>{r.employment_type}</td>
-                            <td>{r._ok ? "Yes" : "No"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
               )}
 
