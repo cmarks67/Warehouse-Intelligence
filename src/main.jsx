@@ -1,7 +1,7 @@
 // /src/main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { AuthProvider } from "./auth/AuthProvider";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
@@ -31,7 +31,7 @@ import "./index.css";
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <AuthProvider>
-      <BrowserRouter>
+      <HashRouter>
         <Routes>
           {/* Public */}
           <Route path="/" element={<Home />} />
@@ -42,10 +42,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 
           {/* Aliases (support sidebar/old links without /app) */}
           <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
-          <Route path="/setup/companies-sites" element={<Navigate to="/app/setup/companies-sites" replace />} />
+          <Route
+            path="/setup/companies-sites"
+            element={<Navigate to="/app/setup/companies-sites" replace />}
+          />
           <Route path="/setup/mhe" element={<Navigate to="/app/setup/mhe" replace />} />
           <Route path="/setup/colleagues" element={<Navigate to="/app/setup/colleagues" replace />} />
-          <Route path="/setup/mhe-training" element={<Navigate to="/app/setup/mhe-training" replace />} />
+          <Route
+            path="/setup/mhe-training"
+            element={<Navigate to="/app/setup/mhe-training" replace />}
+          />
 
           {/* Tools alias */}
           <Route path="/tools/scheduling" element={<Navigate to="/app/tools/scheduling" replace />} />
@@ -128,7 +134,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </AuthProvider>
   </React.StrictMode>
 );
