@@ -1,79 +1,57 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "../supabaseClient";
 
 export default function MasterData() {
-  const [companies, setCompanies] = useState([]);
-  const [sites, setSites] = useState([]);
-  const [companyName, setCompanyName] = useState("");
-  const [siteCompanyId, setSiteCompanyId] = useState("");
-  const [siteName, setSiteName] = useState("");
-  const [siteCode, setSiteCode] = useState("");
-  const [siteAddress, setSiteAddress] = useState("");
-  const [status, setStatus] = useState({ text: "Ready.", isError: false });
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
 
-  /* ----------------------------
-     Load companies
-  ----------------------------- */
+  const [companyName, setCompanyName] = useState("");
+  const [companies, setCompanies] = useState([]);
+
+  /* -----------------------------------------
+     LOAD COMPANIES (via membership model)
+  ------------------------------------------ */
   const loadCompanies = async () => {
-    setLoading(true);
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    const user = userRes?.user;
+
+    if (userErr || !user) {
+      console.error("Auth error:", userErr);
+      setStatus({ text: "You are not signed in.", isError: true });
+      return;
+    }
 
     const { data, error } = await supabase
-      .from("companies")
-      .select("id, name")
-      .order("created_at", { ascending: false });
+      .from("company_users")
+      .select(`
+        company_id,
+        role,
+        companies (
+          id,
+          name
+        )
+      `)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true });
 
     if (error) {
       console.error("Load companies error:", error);
       setStatus({ text: error.message, isError: true });
-      setLoading(false);
       return;
     }
 
-    setCompanies(data ?? []);
-    setLoading(false);
+    const mapped = data.map((row) => ({
+      id: row.companies.id,
+      name: row.companies.name,
+      role: row.role,
+    }));
+
+    setCompanies(mapped);
   };
 
-  /* ----------------------------
-     Load sites (with company)
-  ----------------------------- */
-  const loadSites = async () => {
-    const { data, error } = await supabase
-      .from("sites")
-      .select(
-        `
-        id,
-        name,
-        code,
-        address,
-        company_id,
-        companies (
-          name
-        )
-      `
-      )
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Load sites error:", error);
-      setStatus({ text: error.message, isError: true });
-      return;
-    }
-
-    setSites(data ?? []);
-  };
-
-  /* ----------------------------
-     Initial load
-  ----------------------------- */
-  useEffect(() => {
-    loadCompanies();
-    loadSites();
-  }, []);
-
-  /* ----------------------------
-     Create company
-  ----------------------------- */
+  /* -----------------------------------------
+     CREATE COMPANY + MEMBERSHIP
+  ------------------------------------------ */
   const createCompany = async () => {
     if (!companyName.trim()) {
       setStatus({ text: "Company name is required.", isError: true });
@@ -81,14 +59,45 @@ export default function MasterData() {
     }
 
     setLoading(true);
+    setStatus({ text: "Creating company...", isError: false });
 
-    const { error } = await supabase.from("companies").insert({
-      name: companyName.trim(),
+    // 1) Get logged-in user
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    const user = userRes?.user;
+
+    if (userErr || !user) {
+      setStatus({ text: "You are not signed in.", isError: true });
+      setLoading(false);
+      return;
+    }
+
+    // 2) Create company
+    const { data: company, error: cErr } = await supabase
+      .from("companies")
+      .insert({ name: companyName.trim() })
+      .select("id, name")
+      .single();
+
+    if (cErr) {
+      console.error("Create company error:", cErr);
+      setStatus({ text: cErr.message, isError: true });
+      setLoading(false);
+      return;
+    }
+
+    // 3) Create membership
+    const { error: mErr } = await supabase.from("company_users").insert({
+      company_id: company.id,
+      user_id: user.id,
+      role: "admin",
     });
 
-    if (error) {
-      console.error("Create company error:", error);
-      setStatus({ text: error.message, isError: true });
+    if (mErr) {
+      console.error("Create membership error:", mErr);
+      setStatus({
+        text: `Company created, but membership failed: ${mErr.message}`,
+        isError: true,
+      });
       setLoading(false);
       return;
     }
@@ -99,167 +108,61 @@ export default function MasterData() {
     setLoading(false);
   };
 
-  /* ----------------------------
-     Create site
-  ----------------------------- */
-  const createSite = async () => {
-    if (!siteCompanyId || !siteName.trim()) {
-      setStatus({
-        text: "Company and site name are required.",
-        isError: true,
-      });
-      return;
-    }
+  /* -----------------------------------------
+     INIT
+  ------------------------------------------ */
+  useEffect(() => {
+    loadCompanies();
+  }, []);
 
-    setLoading(true);
-
-    const { error } = await supabase.from("sites").insert({
-      company_id: siteCompanyId,
-      name: siteName.trim(),
-      code: siteCode.trim() || null,
-      address: siteAddress.trim() || null,
-    });
-
-    if (error) {
-      console.error("Create site error:", error);
-      setStatus({ text: error.message, isError: true });
-      setLoading(false);
-      return;
-    }
-
-    setSiteName("");
-    setSiteCode("");
-    setSiteAddress("");
-    setStatus({ text: "Site created.", isError: false });
-    await loadSites();
-    setLoading(false);
-  };
-
-  /* ----------------------------
-     Delete site (dev only)
-  ----------------------------- */
-  const deleteSite = async (id) => {
-    const { error } = await supabase.from("sites").delete().eq("id", id);
-
-    if (error) {
-      console.error("Delete site error:", error);
-      setStatus({ text: error.message, isError: true });
-      return;
-    }
-
-    await loadSites();
-  };
-
-  /* ----------------------------
-     Render
-  ----------------------------- */
+  /* -----------------------------------------
+     RENDER
+  ------------------------------------------ */
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h1>Company &amp; site setup</h1>
-        <button onClick={() => { loadCompanies(); loadSites(); }}>
-          Reload
+    <div className="wi-page">
+      <h1>Company & site setup</h1>
+
+      {status && (
+        <div
+          className={`wi-alert ${
+            status.isError ? "wi-alert--error" : "wi-alert--success"
+          }`}
+        >
+          {status.text}
+        </div>
+      )}
+
+      <section className="wi-card">
+        <h2>Create company</h2>
+
+        <input
+          type="text"
+          placeholder="Company name"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          disabled={loading}
+        />
+
+        <button onClick={createCompany} disabled={loading}>
+          Create company
         </button>
-      </div>
+      </section>
 
-      <div className={`status ${status.isError ? "error" : ""}`}>
-        {status.text}
-      </div>
+      <section className="wi-card">
+        <h2>Your companies</h2>
 
-      <div className="card-grid">
-        {/* Create company */}
-        <div className="card">
-          <h2>Create company</h2>
-          <input
-            type="text"
-            placeholder="e.g., XPO Logistics"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
-          />
-          <button disabled={loading} onClick={createCompany}>
-            Create company
-          </button>
-        </div>
-
-        {/* Create site */}
-        <div className="card">
-          <h2>Create site</h2>
-
-          <select
-            value={siteCompanyId}
-            onChange={(e) => setSiteCompanyId(e.target.value)}
-          >
-            <option value="">
-              {companies.length ? "Select company" : "No companies yet"}
-            </option>
+        {companies.length === 0 ? (
+          <p>No companies yet.</p>
+        ) : (
+          <ul>
             {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <li key={c.id}>
+                <strong>{c.name}</strong> ({c.role})
+              </li>
             ))}
-          </select>
-
-          <input
-            type="text"
-            placeholder="e.g., Daventry DC"
-            value={siteName}
-            onChange={(e) => setSiteName(e.target.value)}
-          />
-
-          <input
-            type="text"
-            placeholder="e.g., DIRFT"
-            value={siteCode}
-            onChange={(e) => setSiteCode(e.target.value)}
-          />
-
-          <input
-            type="text"
-            placeholder="Address (optional)"
-            value={siteAddress}
-            onChange={(e) => setSiteAddress(e.target.value)}
-          />
-
-          <button disabled={loading} onClick={createSite}>
-            Create site
-          </button>
-        </div>
-      </div>
-
-      {/* Sites list */}
-      <div className="card">
-        <h2>Sites</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Site</th>
-              <th>Code</th>
-              <th>Address</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sites.map((s) => (
-              <tr key={s.id}>
-                <td>{s.companies?.name ?? "-"}</td>
-                <td>{s.name}</td>
-                <td>{s.code}</td>
-                <td>{s.address}</td>
-                <td>
-                  <button onClick={() => deleteSite(s.id)}>Delete</button>
-                </td>
-              </tr>
-            ))}
-            {!sites.length && (
-              <tr>
-                <td colSpan="5">No sites yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
