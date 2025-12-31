@@ -1,131 +1,159 @@
-// /src/pages/MasterData.jsx
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../supabaseClient";
+// src/pages/MasterData.jsx
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppLayout } from "../components/AppLayout/AppLayout";
+import { Card } from "../components/Card/Card";
+import { Button } from "../components/Button/Button";
+import supabase from "../lib/supabaseClient";
+
 import "./MasterData.css";
 
 export default function MasterData() {
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState(null);
 
-  // Tenant context (membership)
-  const [me, setMe] = useState(null); // { id, email, account_id, role, account_type }
+  const [me, setMe] = useState(null); // row from public.users
+  const [companies, setCompanies] = useState([]);
+  const [sites, setSites] = useState([]);
 
-  // Companies (scoped by me.account_id)
   const [companyName, setCompanyName] = useState("");
-  const [companies, setCompanies] = useState([]); // [{id,name,created_at}]
 
-  // Sites (scoped by me.account_id)
-  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [siteCompanyId, setSiteCompanyId] = useState("");
   const [siteName, setSiteName] = useState("");
   const [siteCode, setSiteCode] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
-  const [sites, setSites] = useState([]); // [{id, company_id, name, code, address, company_name}]
 
-  const companyOptions = useMemo(() => companies || [], [companies]);
+  const [status, setStatus] = useState({ text: "", isError: false });
+
+  const membershipId = useMemo(() => me?.account_id ?? null, [me]);
 
   const setOk = (text) => setStatus({ text, isError: false });
   const setErr = (text) => setStatus({ text, isError: true });
 
-  /* -----------------------------------------
-     AUTH + TENANT HELPER
-  ------------------------------------------ */
-  const requireAuthUser = async () => {
-    const { data, error } = await supabase.auth.getUser();
-    const user = data?.user;
-    if (error || !user) {
-      console.error("Auth error:", error);
-      setErr("You are not signed in. Please sign in again.");
+  const loadMe = useCallback(async () => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id;
+
+    if (!uid) {
+      setMe(null);
+      setErr("You are not signed in.");
       return null;
     }
-    return user;
-  };
-
-  const loadMe = async () => {
-    const authUser = await requireAuthUser();
-    if (!authUser) return null;
 
     const { data, error } = await supabase
       .from("users")
-      .select("id, email, account_id, role, account_type")
-      .eq("id", authUser.id)
-      .single();
+      .select("id,email,full_name,role,account_type,account_id,is_active")
+      .eq("id", uid)
+      .maybeSingle();
 
     if (error) {
-      console.error("Load me error:", error);
-      setErr(`Unable to load user profile: ${error.message}`);
+      setMe(null);
+      setErr(`Failed to load user profile: ${error.message}`);
       return null;
     }
 
-    if (!data?.account_id) {
-      // With your RLS policies, a missing account_id will block everything.
-      setErr(
-        "Your user profile has no membership (account_id). Please assign an account_id to this user in public.users."
-      );
+    if (!data) {
+      setMe(null);
+      setErr("No row found in public.users for this auth user.");
       return null;
     }
 
     setMe(data);
+
+    if (!data.account_id) {
+      setErr(
+        "Your user has no membership (users.account_id is NULL). Set it before using Companies/Sites."
+      );
+    } else {
+      setStatus({ text: "", isError: false });
+    }
+
     return data;
-  };
+  }, []);
 
-  /* -----------------------------------------
-     LOAD COMPANIES (tenant: account_id)
-  ------------------------------------------ */
-  const loadCompanies = async (accountId) => {
-    const { data, error } = await supabase
-      .from("companies")
-      .select("id, name, created_at")
-      .eq("account_id", accountId)
-      .order("created_at", { ascending: true });
+  const loadCompanies = useCallback(
+    async (acctId) => {
+      if (!acctId) {
+        setCompanies([]);
+        return;
+      }
 
-    if (error) {
-      console.error("Load companies error:", error);
-      setErr(error.message);
-      return [];
-    }
+      const { data, error } = await supabase
+        .from("companies")
+        .select("id,name,created_at,created_by,account_id")
+        .order("created_at", { ascending: false });
 
-    const rows = data || [];
-    setCompanies(rows);
+      // RLS should filter by account_id; this query assumes policies are correct.
+      if (error) {
+        setCompanies([]);
+        setErr(error.message);
+        return;
+      }
 
-    // Default selected company for site creation
-    if (!selectedCompanyId && rows.length > 0) {
-      setSelectedCompanyId(rows[0].id);
-    } else if (selectedCompanyId && rows.length > 0) {
-      // Keep selection if still valid; otherwise reset
-      const stillExists = rows.some((c) => c.id === selectedCompanyId);
-      if (!stillExists) setSelectedCompanyId(rows[0].id);
-    } else if (rows.length === 0) {
-      setSelectedCompanyId("");
-    }
+      // Defensive filter in case policies were temporarily disabled earlier
+      const filtered = (data ?? []).filter((r) => r.account_id === acctId);
+      setCompanies(filtered);
 
-    return rows;
-  };
+      // keep dropdown sensible
+      if (!siteCompanyId && filtered.length) {
+        setSiteCompanyId(filtered[0].id);
+      }
+    },
+    [siteCompanyId]
+  );
 
-  /* -----------------------------------------
-     CREATE COMPANY (tenant: account_id)
-  ------------------------------------------ */
-  const createCompany = async () => {
-    if (!companyName.trim()) return setErr("Company name is required.");
-
-    setLoading(true);
-    setStatus(null);
-
-    const meRow = me || (await loadMe());
-    if (!meRow) {
-      setLoading(false);
+  const loadSites = useCallback(async (acctId) => {
+    if (!acctId) {
+      setSites([]);
       return;
     }
 
-    const payload = {
-      name: companyName.trim(),
-      account_id: meRow.account_id,
-      created_by: meRow.id,
-    };
-
-    const { error } = await supabase.from("companies").insert(payload);
+    const { data, error } = await supabase
+      .from("sites")
+      .select("id,name,code,address,company_id,account_id,companies(name)")
+      .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Create company error:", error);
+      setSites([]);
+      setErr(error.message);
+      return;
+    }
+
+    const filtered = (data ?? []).filter((r) => r.account_id === acctId);
+    setSites(filtered);
+  }, []);
+
+  const reloadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const u = await loadMe();
+      const acctId = u?.account_id ?? null;
+      await Promise.all([loadCompanies(acctId), loadSites(acctId)]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadCompanies, loadMe, loadSites]);
+
+  useEffect(() => {
+    reloadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const createCompany = async () => {
+    const name = companyName.trim();
+    if (!name) return setErr("Enter a company name.");
+    if (!me?.id) return setErr("Not signed in.");
+    if (!membershipId) return setErr("No membership set on this user (users.account_id).");
+
+    setLoading(true);
+    setStatus({ text: "", isError: false });
+
+    // IMPORTANT: include account_id and created_by so RLS passes and row is correctly tenanted
+    const { error } = await supabase.from("companies").insert({
+      name,
+      created_by: me.id,
+      account_id: membershipId,
+    });
+
+    if (error) {
       setErr(error.message);
       setLoading(false);
       return;
@@ -133,81 +161,34 @@ export default function MasterData() {
 
     setCompanyName("");
     setOk("Company created. Next step: create sites under the company.");
-    await loadCompanies(meRow.account_id);
-    await loadSites(meRow.account_id);
+    await loadCompanies(membershipId);
     setLoading(false);
   };
 
-  /* -----------------------------------------
-     LOAD SITES (tenant: account_id)
-  ------------------------------------------ */
-  const loadSites = async (accountId) => {
-    const { data, error } = await supabase
-      .from("sites")
-      .select(
-        `
-        id,
-        company_id,
-        name,
-        code,
-        address,
-        created_at,
-        companies ( name )
-      `
-      )
-      .eq("account_id", accountId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("Load sites error:", error);
-      setErr(error.message);
-      return [];
-    }
-
-    const mapped = (data || []).map((s) => ({
-      id: s.id,
-      company_id: s.company_id,
-      name: s.name,
-      code: s.code,
-      address: s.address,
-      created_at: s.created_at,
-      company_name: s.companies?.name || "",
-    }));
-
-    setSites(mapped);
-    return mapped;
-  };
-
-  /* -----------------------------------------
-     CREATE SITE (tenant: account_id)
-  ------------------------------------------ */
   const createSite = async () => {
-    if (!selectedCompanyId) return setErr("Please select a company.");
-    if (!siteName.trim()) return setErr("Site name is required.");
-    if (!siteCode.trim()) return setErr("Site code is required.");
+    if (!me?.id) return setErr("Not signed in.");
+    if (!membershipId) return setErr("No membership set on this user (users.account_id).");
+
+    const companyId = siteCompanyId;
+    const name = siteName.trim();
+    const code = siteCode.trim();
+
+    if (!companyId) return setErr("Select a company.");
+    if (!name) return setErr("Enter a site name.");
 
     setLoading(true);
-    setStatus(null);
+    setStatus({ text: "", isError: false });
 
-    const meRow = me || (await loadMe());
-    if (!meRow) {
-      setLoading(false);
-      return;
-    }
-
-    const payload = {
-      company_id: selectedCompanyId,
-      name: siteName.trim(),
-      code: siteCode.trim(),
+    const { error } = await supabase.from("sites").insert({
+      company_id: companyId,
+      name,
+      code: code || null,
       address: siteAddress.trim() || null,
-      account_id: meRow.account_id,
-      created_by: meRow.id,
-    };
-
-    const { error } = await supabase.from("sites").insert(payload);
+      created_by: me.id,
+      account_id: membershipId,
+    });
 
     if (error) {
-      console.error("Create site error:", error);
       setErr(error.message);
       setLoading(false);
       return;
@@ -217,240 +198,169 @@ export default function MasterData() {
     setSiteCode("");
     setSiteAddress("");
     setOk("Site created.");
-    await loadSites(meRow.account_id);
+    await loadSites(membershipId);
     setLoading(false);
   };
 
-  /* -----------------------------------------
-     DELETE SITE (tenant enforced by RLS)
-  ------------------------------------------ */
-  const deleteSite = async (siteId) => {
-    if (!siteId) return;
-
-    setLoading(true);
-    setStatus(null);
-
-    const meRow = me || (await loadMe());
-    if (!meRow) {
-      setLoading(false);
-      return;
-    }
-
-    // Optional extra guard: include account_id filter (not required, but clearer)
-    const { error } = await supabase
-      .from("sites")
-      .delete()
-      .eq("id", siteId)
-      .eq("account_id", meRow.account_id);
-
-    if (error) {
-      console.error("Delete site error:", error);
-      setErr(error.message);
-      setLoading(false);
-      return;
-    }
-
+  const deleteSite = async (id) => {
+    // optional: keep/remove. RLS will enforce tenant and permissions.
+    const { error } = await supabase.from("sites").delete().eq("id", id);
+    if (error) return setErr(error.message);
     setOk("Site deleted.");
-    await loadSites(meRow.account_id);
-    setLoading(false);
+    await loadSites(membershipId);
   };
 
-  /* -----------------------------------------
-     RELOAD ALL
-  ------------------------------------------ */
-  const reloadAll = async () => {
-    setStatus(null);
-    setLoading(true);
-
-    const meRow = await loadMe();
-    if (!meRow) {
-      setLoading(false);
-      return;
-    }
-
-    await loadCompanies(meRow.account_id);
-    await loadSites(meRow.account_id);
-
-    setOk("Reloaded.");
-    setLoading(false);
-  };
-
-  /* -----------------------------------------
-     INIT
-  ------------------------------------------ */
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const meRow = await loadMe();
-      if (meRow) {
-        await loadCompanies(meRow.account_id);
-        await loadSites(meRow.account_id);
-      }
-      setLoading(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* -----------------------------------------
-     RENDER
-  ------------------------------------------ */
   return (
-    <div className="wi-page">
-      <div className="wi-md-actions" style={{ alignItems: "center" }}>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ margin: 0 }}>Company & site setup</h1>
-          <div className="wi-md-muted" style={{ marginTop: 6 }}>
-            Create a company, then add sites under it.
-            {me?.account_id ? (
-              <span style={{ marginLeft: 8 }}>
-                Membership: <strong>{me.account_id}</strong>
-              </span>
-            ) : null}
+    <AppLayout>
+      <div className="wi-md">
+        <div className="wi-md__headerRow">
+          <div>
+            <h1 className="wi-md__title">Company &amp; site setup</h1>
+            <div className="wi-md__sub">
+              Create a company, then add sites under it.
+              {membershipId ? (
+                <>
+                  {" "}
+                  Membership: <span className="wi-md__mono">{membershipId}</span>
+                </>
+              ) : null}
+            </div>
           </div>
+
+          <Button onClick={reloadAll} disabled={loading}>
+            Reload
+          </Button>
         </div>
 
-        <button onClick={reloadAll} disabled={loading}>
-          Reload
-        </button>
-      </div>
-
-      {status && (
-        <div className={`wi-md-status ${status.isError ? "wi-md-status--error" : ""}`}>
-          {status.text}
-        </div>
-      )}
-
-      <div className="wi-md-two" style={{ marginTop: 12 }}>
-        {/* CREATE COMPANY */}
-        <section className="wi-md-cardlet">
-          <h3 className="wi-md-h3">Create company</h3>
-
-          <label className="wi-md-label">Company name</label>
-          <input
-            className="wi-md-input"
-            type="text"
-            placeholder="e.g., XPO"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
-            disabled={loading}
-          />
-
-          <div className="wi-md-right">
-            <button onClick={createCompany} disabled={loading}>
-              Create company
-            </button>
+        {status.text ? (
+          <div className={`wi-md__status ${status.isError ? "is-error" : "is-ok"}`}>
+            {status.text}
           </div>
+        ) : null}
 
-          <hr className="wi-md-hr" />
+        <div className="wi-md__grid">
+          <Card>
+            <div className="wi-md__cardTitle">Create company</div>
 
-          <div className="wi-md-muted">
-            Next step: <strong>Sites</strong> — create one or more sites under the company.
-          </div>
-        </section>
+            <label className="wi-md__label">Company name</label>
+            <input
+              className="wi-md__input"
+              type="text"
+              placeholder="e.g., XPO"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+            />
 
-        {/* CREATE SITE */}
-        <section className="wi-md-cardlet">
-          <h3 className="wi-md-h3">Create site</h3>
+            <div className="wi-md__actions">
+              <Button onClick={createCompany} disabled={loading}>
+                Create company
+              </Button>
+            </div>
 
-          <label className="wi-md-label">Company</label>
-          <select
-            className="wi-md-input"
-            value={selectedCompanyId}
-            onChange={(e) => setSelectedCompanyId(e.target.value)}
-            disabled={loading || companyOptions.length === 0}
-          >
-            {companyOptions.length === 0 ? (
-              <option value="">No companies yet</option>
-            ) : (
-              companyOptions.map((c) => (
+            <div className="wi-md__hint">
+              Next step: <strong>Sites</strong> — create one or more sites under the company.
+            </div>
+          </Card>
+
+          <Card>
+            <div className="wi-md__cardTitle">Create site</div>
+
+            <label className="wi-md__label">Company</label>
+            <select
+              className="wi-md__input"
+              value={siteCompanyId}
+              onChange={(e) => setSiteCompanyId(e.target.value)}
+            >
+              <option value="">{companies.length ? "Select company" : "No companies yet"}</option>
+              {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
-              ))
-            )}
-          </select>
+              ))}
+            </select>
 
-          <div className="wi-md-twoInner">
-            <div>
-              <label className="wi-md-label">Site name</label>
-              <input
-                className="wi-md-input"
-                type="text"
-                placeholder="e.g., Daventry DC"
-                value={siteName}
-                onChange={(e) => setSiteName(e.target.value)}
-                disabled={loading}
-              />
+            <div className="wi-md__row2">
+              <div>
+                <label className="wi-md__label">Site name</label>
+                <input
+                  className="wi-md__input"
+                  type="text"
+                  placeholder="e.g., Daventry DC"
+                  value={siteName}
+                  onChange={(e) => setSiteName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="wi-md__label">Site code</label>
+                <input
+                  className="wi-md__input"
+                  type="text"
+                  placeholder="e.g., DIRFT"
+                  value={siteCode}
+                  onChange={(e) => setSiteCode(e.target.value)}
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="wi-md-label">Site code</label>
-              <input
-                className="wi-md-input"
-                type="text"
-                placeholder="e.g., DIRFT"
-                value={siteCode}
-                onChange={(e) => setSiteCode(e.target.value)}
-                disabled={loading}
-              />
+            <label className="wi-md__label">Address (optional)</label>
+            <input
+              className="wi-md__input"
+              type="text"
+              placeholder="e.g., NN11 0XG"
+              value={siteAddress}
+              onChange={(e) => setSiteAddress(e.target.value)}
+            />
+
+            <div className="wi-md__actions">
+              <Button onClick={createSite} disabled={loading}>
+                Create site
+              </Button>
             </div>
-          </div>
+          </Card>
+        </div>
 
-          <label className="wi-md-label">Address (optional)</label>
-          <input
-            className="wi-md-input"
-            type="text"
-            placeholder="e.g., NN11 0XG"
-            value={siteAddress}
-            onChange={(e) => setSiteAddress(e.target.value)}
-            disabled={loading}
-          />
+        <Card>
+          <div className="wi-md__cardTitle">Sites</div>
 
-          <div className="wi-md-right">
-            <button onClick={createSite} disabled={loading || companyOptions.length === 0}>
-              Create site
-            </button>
-          </div>
-        </section>
-      </div>
-
-      {/* SITES LIST */}
-      <section className="wi-md-cardlet" style={{ marginTop: 12 }}>
-        <h3 className="wi-md-h3">Sites</h3>
-
-        {sites.length === 0 ? (
-          <div className="wi-md-muted">No sites yet.</div>
-        ) : (
-          <div className="wi-md-tableWrap">
-            <table className="wi-md-table">
+          <div className="wi-md__tableWrap">
+            <table className="wi-md__table">
               <thead>
                 <tr>
                   <th>Company</th>
                   <th>Site</th>
                   <th>Code</th>
                   <th>Address</th>
-                  <th style={{ width: 120 }}></th>
+                  <th className="wi-md__thRight">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sites.map((s) => (
                   <tr key={s.id}>
-                    <td>{s.company_name}</td>
+                    <td>{s.companies?.name ?? "-"}</td>
                     <td>{s.name}</td>
-                    <td>{s.code}</td>
-                    <td>{s.address || ""}</td>
-                    <td>
-                      <button onClick={() => deleteSite(s.id)} disabled={loading}>
+                    <td>{s.code ?? ""}</td>
+                    <td>{s.address ?? ""}</td>
+                    <td className="wi-md__tdRight">
+                      <Button onClick={() => deleteSite(s.id)} disabled={loading}>
                         Delete
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
+
+                {!sites.length ? (
+                  <tr>
+                    <td colSpan={5} className="wi-md__empty">
+                      No sites yet.
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
-        )}
-      </section>
-    </div>
+        </Card>
+      </div>
+    </AppLayout>
   );
 }
