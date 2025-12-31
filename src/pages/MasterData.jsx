@@ -1,147 +1,147 @@
+// /src/pages/MasterData.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
+import "./MasterData.css";
 
 export default function MasterData() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(null);
 
-  // Companies (via membership)
-  const [companyName, setCompanyName] = useState("");
-  const [companies, setCompanies] = useState([]); // [{id,name,role}]
+  // Tenant context (membership)
+  const [me, setMe] = useState(null); // { id, email, account_id, role, account_type }
 
-  // Sites
+  // Companies (scoped by me.account_id)
+  const [companyName, setCompanyName] = useState("");
+  const [companies, setCompanies] = useState([]); // [{id,name,created_at}]
+
+  // Sites (scoped by me.account_id)
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [siteName, setSiteName] = useState("");
   const [siteCode, setSiteCode] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
   const [sites, setSites] = useState([]); // [{id, company_id, name, code, address, company_name}]
 
-  const companyIds = useMemo(() => companies.map((c) => c.id), [companies]);
+  const companyOptions = useMemo(() => companies || [], [companies]);
 
   const setOk = (text) => setStatus({ text, isError: false });
   const setErr = (text) => setStatus({ text, isError: true });
 
   /* -----------------------------------------
-     AUTH HELPER
+     AUTH + TENANT HELPER
   ------------------------------------------ */
-  const requireUser = async () => {
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-    const user = userRes?.user;
-
-    if (userErr || !user) {
-      console.error("Auth error:", userErr);
+  const requireAuthUser = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    const user = data?.user;
+    if (error || !user) {
+      console.error("Auth error:", error);
       setErr("You are not signed in. Please sign in again.");
       return null;
     }
     return user;
   };
 
-  /* -----------------------------------------
-     LOAD COMPANIES (via membership model)
-  ------------------------------------------ */
-  const loadCompanies = async () => {
-    const user = await requireUser();
-    if (!user) return;
+  const loadMe = async () => {
+    const authUser = await requireAuthUser();
+    if (!authUser) return null;
 
     const { data, error } = await supabase
-      .from("company_users")
-      .select(
-        `
-        company_id,
-        role,
-        companies (
-          id,
-          name
-        )
-      `
-      )
-      .eq("user_id", user.id)
+      .from("users")
+      .select("id, email, account_id, role, account_type")
+      .eq("id", authUser.id)
+      .single();
+
+    if (error) {
+      console.error("Load me error:", error);
+      setErr(`Unable to load user profile: ${error.message}`);
+      return null;
+    }
+
+    if (!data?.account_id) {
+      // With your RLS policies, a missing account_id will block everything.
+      setErr(
+        "Your user profile has no membership (account_id). Please assign an account_id to this user in public.users."
+      );
+      return null;
+    }
+
+    setMe(data);
+    return data;
+  };
+
+  /* -----------------------------------------
+     LOAD COMPANIES (tenant: account_id)
+  ------------------------------------------ */
+  const loadCompanies = async (accountId) => {
+    const { data, error } = await supabase
+      .from("companies")
+      .select("id, name, created_at")
+      .eq("account_id", accountId)
       .order("created_at", { ascending: true });
 
     if (error) {
       console.error("Load companies error:", error);
       setErr(error.message);
-      return;
+      return [];
     }
 
-    const mapped = (data || [])
-      .filter((row) => row.companies) // defensive
-      .map((row) => ({
-        id: row.companies.id,
-        name: row.companies.name,
-        role: row.role,
-      }));
-
-    setCompanies(mapped);
+    const rows = data || [];
+    setCompanies(rows);
 
     // Default selected company for site creation
-    if (!selectedCompanyId && mapped.length > 0) {
-      setSelectedCompanyId(mapped[0].id);
+    if (!selectedCompanyId && rows.length > 0) {
+      setSelectedCompanyId(rows[0].id);
+    } else if (selectedCompanyId && rows.length > 0) {
+      // Keep selection if still valid; otherwise reset
+      const stillExists = rows.some((c) => c.id === selectedCompanyId);
+      if (!stillExists) setSelectedCompanyId(rows[0].id);
+    } else if (rows.length === 0) {
+      setSelectedCompanyId("");
     }
+
+    return rows;
   };
 
   /* -----------------------------------------
-     CREATE COMPANY + MEMBERSHIP
+     CREATE COMPANY (tenant: account_id)
   ------------------------------------------ */
   const createCompany = async () => {
     if (!companyName.trim()) return setErr("Company name is required.");
 
     setLoading(true);
-    setOk("Creating company...");
+    setStatus(null);
 
-    const user = await requireUser();
-    if (!user) {
+    const meRow = me || (await loadMe());
+    if (!meRow) {
       setLoading(false);
       return;
     }
 
-    const { data: company, error: cErr } = await supabase
-      .from("companies")
-      .insert({ name: companyName.trim() })
-      .select("id, name")
-      .single();
+    const payload = {
+      name: companyName.trim(),
+      account_id: meRow.account_id,
+      created_by: meRow.id,
+    };
 
-    if (cErr) {
-      console.error("Create company error:", cErr);
-      setErr(cErr.message);
-      setLoading(false);
-      return;
-    }
+    const { error } = await supabase.from("companies").insert(payload);
 
-    const { error: mErr } = await supabase.from("company_users").insert({
-      company_id: company.id,
-      user_id: user.id,
-      role: "admin",
-    });
-
-    if (mErr) {
-      console.error("Create membership error:", mErr);
-      setErr(`Company created, but membership failed: ${mErr.message}`);
+    if (error) {
+      console.error("Create company error:", error);
+      setErr(error.message);
       setLoading(false);
       return;
     }
 
     setCompanyName("");
-    setOk("Company created (membership added).");
-
-    await loadCompanies();
-    await loadSites(); // refresh sites in case you filter by membership
+    setOk("Company created. Next step: create sites under the company.");
+    await loadCompanies(meRow.account_id);
+    await loadSites(meRow.account_id);
     setLoading(false);
   };
 
   /* -----------------------------------------
-     LOAD SITES (for companies user belongs to)
+     LOAD SITES (tenant: account_id)
   ------------------------------------------ */
-  const loadSites = async () => {
-    const user = await requireUser();
-    if (!user) return;
-
-    // If no companies, then no sites to show
-    if (!companyIds || companyIds.length === 0) {
-      setSites([]);
-      return;
-    }
-
+  const loadSites = async (accountId) => {
     const { data, error } = await supabase
       .from("sites")
       .select(
@@ -155,13 +155,13 @@ export default function MasterData() {
         companies ( name )
       `
       )
-      .in("company_id", companyIds)
+      .eq("account_id", accountId)
       .order("created_at", { ascending: true });
 
     if (error) {
       console.error("Load sites error:", error);
       setErr(error.message);
-      return;
+      return [];
     }
 
     const mapped = (data || []).map((s) => ({
@@ -170,14 +170,16 @@ export default function MasterData() {
       name: s.name,
       code: s.code,
       address: s.address,
+      created_at: s.created_at,
       company_name: s.companies?.name || "",
     }));
 
     setSites(mapped);
+    return mapped;
   };
 
   /* -----------------------------------------
-     CREATE SITE
+     CREATE SITE (tenant: account_id)
   ------------------------------------------ */
   const createSite = async () => {
     if (!selectedCompanyId) return setErr("Please select a company.");
@@ -185,10 +187,10 @@ export default function MasterData() {
     if (!siteCode.trim()) return setErr("Site code is required.");
 
     setLoading(true);
-    setOk("Creating site...");
+    setStatus(null);
 
-    const user = await requireUser();
-    if (!user) {
+    const meRow = me || (await loadMe());
+    if (!meRow) {
       setLoading(false);
       return;
     }
@@ -198,6 +200,8 @@ export default function MasterData() {
       name: siteName.trim(),
       code: siteCode.trim(),
       address: siteAddress.trim() || null,
+      account_id: meRow.account_id,
+      created_by: meRow.id,
     };
 
     const { error } = await supabase.from("sites").insert(payload);
@@ -213,27 +217,31 @@ export default function MasterData() {
     setSiteCode("");
     setSiteAddress("");
     setOk("Site created.");
-
-    await loadSites();
+    await loadSites(meRow.account_id);
     setLoading(false);
   };
 
   /* -----------------------------------------
-     DELETE SITE (optional but useful)
+     DELETE SITE (tenant enforced by RLS)
   ------------------------------------------ */
   const deleteSite = async (siteId) => {
     if (!siteId) return;
 
     setLoading(true);
-    setOk("Deleting site...");
+    setStatus(null);
 
-    const user = await requireUser();
-    if (!user) {
+    const meRow = me || (await loadMe());
+    if (!meRow) {
       setLoading(false);
       return;
     }
 
-    const { error } = await supabase.from("sites").delete().eq("id", siteId);
+    // Optional extra guard: include account_id filter (not required, but clearer)
+    const { error } = await supabase
+      .from("sites")
+      .delete()
+      .eq("id", siteId)
+      .eq("account_id", meRow.account_id);
 
     if (error) {
       console.error("Delete site error:", error);
@@ -243,7 +251,27 @@ export default function MasterData() {
     }
 
     setOk("Site deleted.");
-    await loadSites();
+    await loadSites(meRow.account_id);
+    setLoading(false);
+  };
+
+  /* -----------------------------------------
+     RELOAD ALL
+  ------------------------------------------ */
+  const reloadAll = async () => {
+    setStatus(null);
+    setLoading(true);
+
+    const meRow = await loadMe();
+    if (!meRow) {
+      setLoading(false);
+      return;
+    }
+
+    await loadCompanies(meRow.account_id);
+    await loadSites(meRow.account_id);
+
+    setOk("Reloaded.");
     setLoading(false);
   };
 
@@ -252,148 +280,166 @@ export default function MasterData() {
   ------------------------------------------ */
   useEffect(() => {
     (async () => {
-      await loadCompanies();
+      setLoading(true);
+      const meRow = await loadMe();
+      if (meRow) {
+        await loadCompanies(meRow.account_id);
+        await loadSites(meRow.account_id);
+      }
+      setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // When companies list changes, refresh sites (membership filter depends on it)
-  useEffect(() => {
-    if (companies.length > 0) loadSites();
-    else setSites([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companies.map((c) => c.id).join("|")]);
 
   /* -----------------------------------------
      RENDER
   ------------------------------------------ */
   return (
     <div className="wi-page">
-      <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
-        <h1 style={{ margin: 0 }}>Company & site setup</h1>
-        <button
-          onClick={async () => {
-            setStatus(null);
-            await loadCompanies();
-            await loadSites();
-            setOk("Reloaded.");
-          }}
-          disabled={loading}
-        >
+      <div className="wi-md-actions" style={{ alignItems: "center" }}>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ margin: 0 }}>Company & site setup</h1>
+          <div className="wi-md-muted" style={{ marginTop: 6 }}>
+            Create a company, then add sites under it.
+            {me?.account_id ? (
+              <span style={{ marginLeft: 8 }}>
+                Membership: <strong>{me.account_id}</strong>
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <button onClick={reloadAll} disabled={loading}>
           Reload
         </button>
       </div>
 
       {status && (
-        <div
-          className={`wi-alert ${status.isError ? "wi-alert--error" : "wi-alert--success"}`}
-          style={{ marginTop: 12 }}
-        >
+        <div className={`wi-md-status ${status.isError ? "wi-md-status--error" : ""}`}>
           {status.text}
         </div>
       )}
 
-      {/* CREATE COMPANY */}
-      <section className="wi-card" style={{ marginTop: 16 }}>
-        <h2>Create company</h2>
+      <div className="wi-md-two" style={{ marginTop: 12 }}>
+        {/* CREATE COMPANY */}
+        <section className="wi-md-cardlet">
+          <h3 className="wi-md-h3">Create company</h3>
 
-        <label style={{ display: "block", marginBottom: 6 }}>Company name</label>
-        <input
-          type="text"
-          placeholder="e.g., XPO"
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          disabled={loading}
-        />
+          <label className="wi-md-label">Company name</label>
+          <input
+            className="wi-md-input"
+            type="text"
+            placeholder="e.g., XPO"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            disabled={loading}
+          />
 
-        <div style={{ marginTop: 12 }}>
-          <button onClick={createCompany} disabled={loading}>
-            Create company
-          </button>
-        </div>
-      </section>
+          <div className="wi-md-right">
+            <button onClick={createCompany} disabled={loading}>
+              Create company
+            </button>
+          </div>
 
-      {/* CREATE SITE */}
-      <section className="wi-card" style={{ marginTop: 16 }}>
-        <h2>Create site</h2>
+          <hr className="wi-md-hr" />
 
-        <label style={{ display: "block", marginBottom: 6 }}>Company</label>
-        <select
-          value={selectedCompanyId}
-          onChange={(e) => setSelectedCompanyId(e.target.value)}
-          disabled={loading || companies.length === 0}
-        >
-          {companies.length === 0 ? (
-            <option value="">No companies yet</option>
-          ) : (
-            companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))
-          )}
-        </select>
+          <div className="wi-md-muted">
+            Next step: <strong>Sites</strong> — create one or more sites under the company.
+          </div>
+        </section>
 
-        <label style={{ display: "block", marginTop: 10, marginBottom: 6 }}>Site name</label>
-        <input
-          type="text"
-          placeholder="e.g., Daventry DC"
-          value={siteName}
-          onChange={(e) => setSiteName(e.target.value)}
-          disabled={loading}
-        />
+        {/* CREATE SITE */}
+        <section className="wi-md-cardlet">
+          <h3 className="wi-md-h3">Create site</h3>
 
-        <label style={{ display: "block", marginTop: 10, marginBottom: 6 }}>Site code</label>
-        <input
-          type="text"
-          placeholder="e.g., DIRFT"
-          value={siteCode}
-          onChange={(e) => setSiteCode(e.target.value)}
-          disabled={loading}
-        />
+          <label className="wi-md-label">Company</label>
+          <select
+            className="wi-md-input"
+            value={selectedCompanyId}
+            onChange={(e) => setSelectedCompanyId(e.target.value)}
+            disabled={loading || companyOptions.length === 0}
+          >
+            {companyOptions.length === 0 ? (
+              <option value="">No companies yet</option>
+            ) : (
+              companyOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))
+            )}
+          </select>
 
-        <label style={{ display: "block", marginTop: 10, marginBottom: 6 }}>Address (optional)</label>
-        <input
-          type="text"
-          placeholder="e.g., NN11 0XG"
-          value={siteAddress}
-          onChange={(e) => setSiteAddress(e.target.value)}
-          disabled={loading}
-        />
+          <div className="wi-md-twoInner">
+            <div>
+              <label className="wi-md-label">Site name</label>
+              <input
+                className="wi-md-input"
+                type="text"
+                placeholder="e.g., Daventry DC"
+                value={siteName}
+                onChange={(e) => setSiteName(e.target.value)}
+                disabled={loading}
+              />
+            </div>
 
-        <div style={{ marginTop: 12 }}>
-          <button onClick={createSite} disabled={loading || companies.length === 0}>
-            Create site
-          </button>
-        </div>
-      </section>
+            <div>
+              <label className="wi-md-label">Site code</label>
+              <input
+                className="wi-md-input"
+                type="text"
+                placeholder="e.g., DIRFT"
+                value={siteCode}
+                onChange={(e) => setSiteCode(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          </div>
+
+          <label className="wi-md-label">Address (optional)</label>
+          <input
+            className="wi-md-input"
+            type="text"
+            placeholder="e.g., NN11 0XG"
+            value={siteAddress}
+            onChange={(e) => setSiteAddress(e.target.value)}
+            disabled={loading}
+          />
+
+          <div className="wi-md-right">
+            <button onClick={createSite} disabled={loading || companyOptions.length === 0}>
+              Create site
+            </button>
+          </div>
+        </section>
+      </div>
 
       {/* SITES LIST */}
-      <section className="wi-card" style={{ marginTop: 16 }}>
-        <h2>Sites</h2>
+      <section className="wi-md-cardlet" style={{ marginTop: 12 }}>
+        <h3 className="wi-md-h3">Sites</h3>
 
         {sites.length === 0 ? (
-          <p>No sites yet.</p>
+          <div className="wi-md-muted">No sites yet.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="wi-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div className="wi-md-tableWrap">
+            <table className="wi-md-table">
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Company</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Site</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Code</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}>Address</th>
-                  <th style={{ textAlign: "left", padding: "10px 8px" }}></th>
+                  <th>Company</th>
+                  <th>Site</th>
+                  <th>Code</th>
+                  <th>Address</th>
+                  <th style={{ width: 120 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {sites.map((s) => (
                   <tr key={s.id}>
-                    <td style={{ padding: "10px 8px" }}>{s.company_name}</td>
-                    <td style={{ padding: "10px 8px" }}>{s.name}</td>
-                    <td style={{ padding: "10px 8px" }}>{s.code}</td>
-                    <td style={{ padding: "10px 8px" }}>{s.address || ""}</td>
-                    <td style={{ padding: "10px 8px" }}>
+                    <td>{s.company_name}</td>
+                    <td>{s.name}</td>
+                    <td>{s.code}</td>
+                    <td>{s.address || ""}</td>
+                    <td>
                       <button onClick={() => deleteSite(s.id)} disabled={loading}>
                         Delete
                       </button>
