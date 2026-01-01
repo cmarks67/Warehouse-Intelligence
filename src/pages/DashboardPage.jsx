@@ -44,7 +44,7 @@ function pathFromKey(key) {
   }
 }
 
-/** Date helpers (ported from your original dashboard.html) */
+/** Date helpers (aligned with MheSetup + original dashboard behaviour) */
 function startOfToday() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -77,6 +77,8 @@ function nextDueReason(asset) {
   return { label: top.label, ymd: top.ymd, date: top.date, days: daysUntil(top.ymd) };
 }
 
+const safe = (v) => (v === null || v === undefined ? "" : String(v));
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -86,7 +88,10 @@ export function DashboardPage() {
 
   // Tenant boundary + membership
   const [accountId, setAccountId] = useState("");
-  const [allowedCompanyIds, setAllowedCompanyIds] = useState([]);
+
+  // Companies the user is allowed to access (membership enforced)
+  const [allowedCompanies, setAllowedCompanies] = useState([]);
+  const [companyId, setCompanyId] = useState(""); // selected company
 
   // Alerts UI state
   const [alertsLoading, setAlertsLoading] = useState(true);
@@ -94,6 +99,12 @@ export function DashboardPage() {
   const [alertsRows, setAlertsRows] = useState([]);
 
   const onSelectNav = (key) => navigate(pathFromKey(key));
+
+  // Persist selected company per account (so different accounts do not clash)
+  const companyStorageKey = useMemo(
+    () => (accountId ? `wi.selectedCompanyId.${accountId}` : "wi.selectedCompanyId"),
+    [accountId]
+  );
 
   const resolveAccountId = useCallback(async (userId) => {
     // Primary: public.users
@@ -109,10 +120,18 @@ export function DashboardPage() {
     return "";
   }, []);
 
-  // Init auth + email + accountId + memberships
+  /**
+   * Initialise session:
+   * - resolve user + email
+   * - resolve accountId
+   * - load allowed companies from company_users memberships
+   * - set default selected company (persisted)
+   */
   useEffect(() => {
     (async () => {
       try {
+        setAlertsError("");
+
         const { data: authData, error: authErr } = await supabase.auth.getUser();
         if (authErr) throw authErr;
 
@@ -131,7 +150,7 @@ export function DashboardPage() {
         }
         setAccountId(aId);
 
-        // Memberships (company_users) to enforce allowed company set
+        // Memberships (company_users): determine allowed company ids for this user+account
         const { data: cuRows, error: cuErr } = await supabase
           .from("company_users")
           .select("company_id,account_id")
@@ -140,13 +159,34 @@ export function DashboardPage() {
 
         if (cuErr) throw cuErr;
 
-        const ids = Array.from(new Set((cuRows || []).map((r) => r.company_id).filter(Boolean)));
-        if (!ids.length) {
+        const allowedIds = Array.from(new Set((cuRows || []).map((r) => r.company_id).filter(Boolean)));
+        if (!allowedIds.length) {
           setAlertsError("No companies assigned to this user (company_users) for this account.");
           return;
         }
 
-        setAllowedCompanyIds(ids);
+        // Load tenant companies, then filter to allowed company ids (same approach as your MheSetup)
+        const { data: companiesAll, error: ec } = await supabase
+          .from("companies")
+          .select("id, name, account_id")
+          .eq("account_id", aId)
+          .order("name", { ascending: true });
+        if (ec) throw ec;
+
+        const allowed = (companiesAll || []).filter((c) => allowedIds.includes(c.id));
+        if (!allowed.length) {
+          setAlertsError("Your company memberships do not match any companies in this tenant.");
+          return;
+        }
+
+        setAllowedCompanies(allowed);
+
+        // Default selected company: persisted if valid, else first allowed
+        const saved = localStorage.getItem(`wi.selectedCompanyId.${aId}`) || "";
+        const initial = saved && allowed.some((c) => c.id === saved) ? saved : allowed[0].id;
+
+        setCompanyId(initial);
+        localStorage.setItem(`wi.selectedCompanyId.${aId}`, initial);
       } catch (e) {
         setAlertsError(e?.message || "Failed to initialise dashboard.");
       }
@@ -160,59 +200,48 @@ export function DashboardPage() {
 
     try {
       if (!accountId) throw new Error("No account_id resolved.");
-      if (!allowedCompanyIds.length) throw new Error("No allowed companies resolved for this user.");
+      if (!companyId) throw new Error("Select a company to view alerts.");
 
-      // Tenant scoped companies (then filtered to membership)
-      const { data: companiesAll, error: ec } = await supabase
-        .from("companies")
-        .select("id, name, account_id")
-        .eq("account_id", accountId)
-        .order("name", { ascending: true });
-      if (ec) throw ec;
-
-      const companies = (companiesAll || []).filter((c) => allowedCompanyIds.includes(c.id));
-
-      // Tenant scoped sites, but also only those within allowed companies
-      const { data: sitesAll, error: es } = await supabase
+      // Sites for selected company (tenant-scoped)
+      const { data: sites, error: es } = await supabase
         .from("sites")
         .select("id, company_id, name, code, account_id")
         .eq("account_id", accountId)
+        .eq("company_id", companyId)
         .order("name", { ascending: true });
       if (es) throw es;
 
-      const sites = (sitesAll || []).filter((s) => allowedCompanyIds.includes(s.company_id));
-
-      // Types are tenant-scoped if you have account_id; if not, keep as-is
-      // (Most builds make mhe_types tenant-scoped; adjust if yours is global.)
-      const { data: types, error: et } = await supabase.from("mhe_types").select("id, type_name");
-      if (et) throw et;
-
-      // Assets must be tenant-scoped and limited to allowed sites
-      const siteIdSet = new Set((sites || []).map((s) => s.id));
-      if (siteIdSet.size === 0) {
+      const siteIds = (sites || []).map((s) => s.id);
+      if (!siteIds.length) {
         setAlertsRows([]);
-        setAlertsLoading(false);
         return;
       }
 
+      // Company label (for display)
+      const companyName = allowedCompanies.find((c) => c.id === companyId)?.name || "";
+
+      // Types (your MheSetup treats mhe_types as global; keep consistent)
+      const { data: types, error: et } = await supabase.from("mhe_types").select("id, type_name");
+      if (et) throw et;
+
+      // Assets for all sites under selected company (tenant-scoped)
       const { data: assetsAll, error: ea } = await supabase
         .from("mhe_assets")
         .select("id, site_id, mhe_type_id, asset_tag, serial_number, status, next_inspection_due, next_loler_due, next_service_due, next_puwer_due, account_id")
-        .eq("account_id", accountId);
+        .eq("account_id", accountId)
+        .in("site_id", siteIds);
+
       if (ea) throw ea;
 
-      const assets = (assetsAll || []).filter((a) => siteIdSet.has(a.site_id));
-
-      const safe = (v) => (v === null || v === undefined ? "" : String(v));
+      const assets = assetsAll || [];
 
       const rows = assets
         .map((a) => {
           const due = nextDueReason(a);
           const site = (sites || []).find((s) => s.id === a.site_id);
-          const comp = (companies || []).find((c) => c.id === site?.company_id);
           const type = (types || []).find((t) => t.id === a.mhe_type_id);
 
-          const siteLabel = `${safe(comp?.name)} – ${safe(site?.name)}${site?.code ? ` (${safe(site.code)})` : ""}`;
+          const siteLabel = `${safe(companyName)} – ${safe(site?.name)}${site?.code ? ` (${safe(site.code)})` : ""}`;
           const assetLabel = a.asset_tag || a.serial_number || "—";
 
           let bucket = 3; // 0 overdue, 1 due soon, 2 ok, 3 no dates
@@ -247,12 +276,26 @@ export function DashboardPage() {
     } finally {
       setAlertsLoading(false);
     }
-  }, [accountId, allowedCompanyIds]);
+  }, [accountId, companyId, allowedCompanies]);
 
-  // Load on initial dashboard render (overview)
+  // When company changes, reload alerts and persist selection
   useEffect(() => {
-    if (active === "overview" && accountId && allowedCompanyIds.length) loadAlerts();
-  }, [active, accountId, allowedCompanyIds, loadAlerts]);
+    if (!accountId) return;
+    if (!companyId) return;
+
+    localStorage.setItem(companyStorageKey, companyId);
+
+    if (active === "overview") loadAlerts();
+  }, [active, accountId, companyId, companyStorageKey, loadAlerts]);
+
+  // Load alerts on first entry once company selected
+  useEffect(() => {
+    if (active === "overview" && accountId && companyId) loadAlerts();
+  }, [active, accountId, companyId, loadAlerts]);
+
+  const selectedCompanyName = useMemo(() => {
+    return allowedCompanies.find((c) => c.id === companyId)?.name || "";
+  }, [allowedCompanies, companyId]);
 
   return (
     <AppLayout activeNav={active} onSelectNav={onSelectNav} headerEmail={email}>
@@ -264,11 +307,57 @@ export function DashboardPage() {
           </Card>
 
           <Card
+            title="Company"
+            subtitle="Select a company to view data across all sites under that company."
+            actions={
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    if (companyId) loadAlerts();
+                  }}
+                  disabled={!companyId || alertsLoading}
+                >
+                  Reload
+                </Button>
+              </div>
+            }
+          >
+            <label className="wi-muted" style={{ display: "block", marginBottom: 6 }}>
+              Company
+            </label>
+            <select
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
+              disabled={!allowedCompanies.length}
+              style={{
+                width: "100%",
+                padding: "10px",
+                borderRadius: 10,
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+              {allowedCompanies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+
+            {!!selectedCompanyName && (
+              <div className="wi-muted" style={{ marginTop: 8 }}>
+                Showing: {selectedCompanyName}
+              </div>
+            )}
+          </Card>
+
+          <Card
             title="Equipment alerts"
             subtitle="Overdue and due within 30 days (earliest of Inspection / LOLER / Service / PUWER)."
             actions={
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                <Button variant="primary" onClick={loadAlerts}>
+                <Button variant="primary" onClick={loadAlerts} disabled={!companyId}>
                   Reload
                 </Button>
                 <Button variant="primary" onClick={() => navigate("/app/setup/mhe")}>
@@ -277,19 +366,21 @@ export function DashboardPage() {
               </div>
             }
           >
-            {alertsLoading && <div className="wi-muted">Loading…</div>}
+            {!companyId && <div className="wi-muted">Select a company to view alerts.</div>}
 
-            {!alertsLoading && alertsError && (
+            {companyId && alertsLoading && <div className="wi-muted">Loading…</div>}
+
+            {companyId && !alertsLoading && alertsError && (
               <div className="wi-muted" style={{ color: "#b91c1c" }}>
                 {alertsError}
               </div>
             )}
 
-            {!alertsLoading && !alertsError && alertsRows.length === 0 && (
+            {companyId && !alertsLoading && !alertsError && alertsRows.length === 0 && (
               <div className="wi-muted">No items due within 30 days. Good position.</div>
             )}
 
-            {!alertsLoading && !alertsError && alertsRows.length > 0 && (
+            {companyId && !alertsLoading && !alertsError && alertsRows.length > 0 && (
               <div style={{ marginTop: 10, overflow: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -308,8 +399,7 @@ export function DashboardPage() {
                       const isOverdue = r._bucket === 0;
                       const isSoon = r._bucket === 1;
 
-                      const daysText =
-                        r.days === null ? "—" : r.days < 0 ? `${Math.abs(r.days)} overdue` : `${r.days} days`;
+                      const daysText = r.days === null ? "—" : r.days < 0 ? `${Math.abs(r.days)} overdue` : `${r.days} days`;
 
                       const rowStyle = isOverdue
                         ? { background: "#7f1d1d", color: "#fff" }
