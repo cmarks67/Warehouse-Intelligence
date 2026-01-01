@@ -1,0 +1,71 @@
+/* src/pages/Dashboard.css */
+
+.wi-page {
+  display: grid;
+  gap: 16px;
+}
+
+.wi-card__titleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.wi-card__title {
+  font-weight: 600;
+}
+
+.wi-card__sub {
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
+.wi-muted {
+  opacity: 0.75;
+}
+
+.wi-error {
+  color: #b91c1c;
+  margin-top: 8px;
+}
+
+.wi-formRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 420px;
+}
+
+.wi-label {
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
+.wi-select {
+  padding: 8px;
+}
+
+.wi-tableWrap {
+  overflow-x: auto;
+}
+
+.wi-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wi-table th,
+.wi-table td {
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.wi-row--bad {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.wi-row--warn {
+  background: rgba(245, 158, 11, 0.08);
+}
