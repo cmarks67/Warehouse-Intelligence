@@ -5,13 +5,8 @@ import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 
-import { createClient } from "@supabase/supabase-js";
+import supabase from "../lib/supabaseClient";
 import "./Dashboard.css";
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 function daysBetween(a, b) {
   const ms = b.getTime() - a.getTime();
@@ -24,7 +19,11 @@ function toDateSafe(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// ✅ IMPORTANT: named export (matches main.jsx import)
+/**
+ * IMPORTANT:
+ * - We export BOTH named + default so main.jsx can import { DashboardPage } safely,
+ *   while also allowing default import if you ever switch later.
+ */
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -45,24 +44,34 @@ export function DashboardPage() {
   const [pageErr, setPageErr] = useState("");
 
   const storageKey = useMemo(() => {
-    // user-specific so one mobile browser can switch users safely
     const uid = user?.id || "anon";
     return `wi.selectedCompanyId.${uid}`;
   }, [user?.id]);
 
+  /**
+   * Robust auth handling:
+   * - getUser() throws "Auth session missing!" when no session.
+   * - We should treat that as "not signed in" and redirect to /login.
+   */
   const loadUserAndAccount = useCallback(async () => {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) throw error;
+    // Step 1: check session first (no throw)
+    const { data: sessData, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr) throw sessErr;
 
-    const u = data?.user || null;
+    const session = sessData?.session || null;
+    const u = session?.user || null;
+
     setUser(u);
 
     if (!u) {
       setAccountId("");
+      // If your app requires auth for dashboard, push to login.
+      // If you prefer a "public" dashboard shell, remove this navigate.
+      navigate("/login", { replace: true });
       return;
     }
 
-    // Pull account_id from your public.users row (same pattern as my_account_id())
+    // Step 2: pull account_id from public.users
     const { data: urow, error: uerr } = await supabase
       .from("users")
       .select("account_id")
@@ -71,11 +80,12 @@ export function DashboardPage() {
 
     if (uerr) throw uerr;
     setAccountId(urow?.account_id || "");
-  }, []);
+  }, [navigate]);
 
   const loadCompanies = useCallback(async () => {
     setLoadingCompanies(true);
     setCompanyErr("");
+
     try {
       const { data, error } = await supabase
         .from("companies")
@@ -160,6 +170,7 @@ export function DashboardPage() {
 
         if (inspErr) throw inspErr;
 
+        // Earliest next_due_date per asset
         const nextDueByAsset = new Map();
         for (const r of inspRows || []) {
           const due = toDateSafe(r.next_due_date);
@@ -177,6 +188,9 @@ export function DashboardPage() {
         const today = new Date();
         const rows = [];
 
+        // Build rows for overdue / due soon
+        const siteById = new Map(companySites.map((s) => [s.id, s]));
+
         for (const a of assetList) {
           const nd = nextDueByAsset.get(a.id);
           if (!nd) continue;
@@ -185,7 +199,8 @@ export function DashboardPage() {
           const status = days < 0 ? "overdue" : days <= 30 ? "due_soon" : "ok";
           if (status === "ok") continue;
 
-          const site = companySites.find((s) => s.id === a.site_id);
+          const site = siteById.get(a.site_id);
+
           rows.push({
             siteName: site?.name || "Unknown site",
             assetTag: a.asset_tag || "",
@@ -218,16 +233,19 @@ export function DashboardPage() {
   // Initial load
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         setPageErr("");
         await loadUserAndAccount();
+        // If loadUserAndAccount redirected to /login, user will be null; still safe.
         await loadCompanies();
       } catch (e) {
         if (!alive) return;
         setPageErr(e?.message || "Failed to load dashboard.");
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -245,7 +263,8 @@ export function DashboardPage() {
     await loadCompanies();
   };
 
-  const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || null;
+  const selectedCompany =
+    companies.find((c) => c.id === selectedCompanyId) || null;
 
   return (
     <AppLayout>
@@ -313,17 +332,22 @@ export function DashboardPage() {
             <div>
               <div className="wi-card__title">Equipment alerts</div>
               <div className="wi-card__sub">
-                Overdue and due within 30 days (earliest of Inspection / LOLER / Service / PUWER).
+                Overdue and due within 30 days (earliest of Inspection / LOLER /
+                Service / PUWER).
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button
-                onClick={() => selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)}
+                onClick={() =>
+                  selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)
+                }
                 disabled={!selectedCompanyId || loadingAlerts}
               >
                 {loadingAlerts ? "Loading..." : "Reload"}
               </Button>
-              <Button onClick={() => navigate("/mhe-setup")}>Open MHE setup</Button>
+              <Button onClick={() => navigate("/mhe-setup")}>
+                Open MHE setup
+              </Button>
             </div>
           </div>
 
@@ -371,14 +395,16 @@ export function DashboardPage() {
         <Card>
           <div className="wi-card__title">Scheduling tool</div>
           <div className="wi-card__sub">
-            Plan MHE and labour, track indirect time, and compare plan vs actual by shift.
+            Plan MHE and labour, track indirect time, and compare plan vs actual by
+            shift.
           </div>
-          <Button onClick={() => navigate("/scheduling-tool")}>Open scheduling tool</Button>
+          <Button onClick={() => navigate("/scheduling-tool")}>
+            Open scheduling tool
+          </Button>
         </Card>
       </div>
     </AppLayout>
   );
 }
 
-// ✅ Optional but fine: default export too (doesn't affect main.jsx)
 export default DashboardPage;
