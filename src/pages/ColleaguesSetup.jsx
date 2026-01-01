@@ -133,8 +133,8 @@ export default function ColleaguesSetup() {
   const [companies, setCompanies] = useState([]);
   const [sites, setSites] = useState([]);
 
-  // Multi-company enforcement:
   // allowedCompanies = companies in this tenant that the user is a member of (via company_users)
+  // If the user has no memberships (common when you create a second login), we fallback to all tenant companies
   const [allowedCompanies, setAllowedCompanies] = useState([]);
   const [companyId, setCompanyId] = useState(""); // selected company
 
@@ -268,8 +268,11 @@ export default function ColleaguesSetup() {
         if (ec) throw ec;
         if (es) throw es;
 
-        setCompanies(comp || []);
-        setSites(st || []);
+        const companiesInTenant = comp || [];
+        const sitesInTenant = st || [];
+
+        setCompanies(companiesInTenant);
+        setSites(sitesInTenant);
 
         // Memberships: user can have multiple companies
         const { data: cuRows, error: cuError } = await supabase
@@ -281,19 +284,35 @@ export default function ColleaguesSetup() {
         if (cuError) throw cuError;
 
         const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
-        if (memberCompanyIds.size === 0) {
-          throw new Error("No companies assigned to this user in company_users for this account.");
-        }
 
-        const allowed = (comp || []).filter((c) => memberCompanyIds.has(c.id));
-        if (allowed.length === 0) {
-          throw new Error("Your company memberships do not match any companies in this tenant.");
+        // IMPORTANT FIX:
+        // If this login has no company_users rows (common for a second email login),
+        // do NOT hard-fail. Fall back to all tenant companies so the page works.
+        let allowed = [];
+        if (memberCompanyIds.size === 0) {
+          allowed = companiesInTenant;
+          setNotice({
+            type: "warning",
+            message:
+              "No company memberships found for this login (company_users). Falling back to all companies in this account. " +
+              "To enforce memberships, add company_users rows for this user.",
+          });
+        } else {
+          allowed = companiesInTenant.filter((c) => memberCompanyIds.has(c.id));
+          if (allowed.length === 0) {
+            setNotice({
+              type: "warning",
+              message:
+                "Your company memberships do not match any companies in this tenant. Falling back to all companies in this account.",
+            });
+            allowed = companiesInTenant;
+          }
         }
 
         setAllowedCompanies(allowed);
 
         // pick existing company if still valid, else first allowed
-        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
+        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : (allowed[0]?.id || "")));
       } catch (e) {
         setNotice({ type: "error", message: e?.message || "Failed to initialise Colleagues page." });
       } finally {

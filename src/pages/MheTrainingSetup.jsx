@@ -5,261 +5,349 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
-
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabaseClient";
 
 import "./MheTrainingSetup.css";
 
-/**
- * Design system note:
- * This page must only use standard layout primitives (AppLayout/Card/Button).
- * Inputs/selects are native HTML controls styled via CSS.
- *
- * DB write target ("sheet"):
- *   public.colleague_mhe_authorisations
- */
-
-// Supabase client (matches your existing pattern in other pages)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-function toLowerTrim(v) {
+function safeLower(v) {
   return (v ?? "").toString().trim().toLowerCase();
 }
 
-function isValidYMD(v) {
-  if (!v) return false;
-  const s = String(v).trim();
+function isValidYMD(ymd) {
+  if (!ymd) return false;
+  const s = String(ymd).trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(s + "T00:00:00Z");
+  const d = new Date(`${s}T00:00:00`);
   return !Number.isNaN(d.getTime());
 }
 
+function daysUntil(ymd) {
+  if (!ymd) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dt = new Date(`${ymd}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return null;
+  const diff = dt.getTime() - today.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+// Outstanding definition:
+// - due date missing => outstanding
+// - due date within 30 days => outstanding
+// - overdue => outstanding
+const OUTSTANDING_DAYS = 30;
+
 function activeFromPath(pathname) {
-  const p = toLowerTrim(pathname);
-  if (p.includes("/setup/mhe-training")) return "mhe_training";
-  if (p.includes("/setup/mhe")) return "mhe_setup";
-  if (p.includes("/setup/company")) return "company_site_setup";
-  if (p.includes("/setup/colleagues")) return "colleagues";
-  if (p.includes("/tools/scheduling")) return "scheduling_tool";
-  if (p.includes("/connections")) return "data_connections";
-  if (p.includes("/settings/users")) return "users";
-  if (p.includes("/settings/password")) return "password_reset";
+  // Most specific first
+  if (pathname.startsWith("/app/setup/mhe-training")) return "mhe-training";
+  if (pathname.startsWith("/app/tools/mhe-training")) return "mhe-training";
+
+  if (pathname.startsWith("/app/setup/companies-sites")) return "company-site-setup";
+  if (pathname.startsWith("/app/setup/colleagues")) return "colleagues-setup";
+  if (pathname.startsWith("/app/setup/mhe")) return "mhe-setup";
+  if (pathname.startsWith("/app/connections")) return "connections";
+  if (pathname.startsWith("/app/tools/scheduling")) return "scheduling-tool";
+  if (pathname.startsWith("/app/users")) return "users";
+  if (pathname.startsWith("/app/password")) return "password";
   return "overview";
 }
 
 function pathFromKey(key) {
   switch (key) {
     case "overview":
-      return "/dashboard";
-    case "company_site_setup":
-      return "/setup/company-site";
-    case "colleagues":
-      return "/setup/colleagues";
-    case "mhe_setup":
-      return "/setup/mhe";
-    case "mhe_training":
-      return "/setup/mhe-training";
-    case "data_connections":
-      return "/connections";
-    case "scheduling_tool":
-      return "/tools/scheduling";
+      return "/app/dashboard";
+    case "company-site-setup":
+      return "/app/setup/companies-sites";
+    case "colleagues-setup":
+      return "/app/setup/colleagues";
+    case "mhe-setup":
+      return "/app/setup/mhe";
+    case "connections":
+      return "/app/connections";
+    case "scheduling-tool":
+      return "/app/tools/scheduling";
+    case "mhe-training":
+      return "/app/setup/mhe-training";
     case "users":
-      return "/settings/users";
-    case "password_reset":
-      return "/settings/password";
+      return "/app/users";
+    case "password":
+      return "/app/password";
     default:
-      return "/dashboard";
+      return "/app/dashboard";
   }
 }
 
-/**
- * Page-local modal (uses Card + Button so it stays within your design system)
- */
-function PageModal({ open, title, onClose, children }) {
-  if (!open) return null;
-
-  return (
-    <div className="wi-modalBackdrop" onMouseDown={onClose} role="presentation">
-      <div className="wi-modalContainer" onMouseDown={(e) => e.stopPropagation()} role="presentation">
-        <Card>
-          <div className="wi-modalHeader">
-            <div className="wi-modalTitle">{title}</div>
-            <Button variant="secondary" onClick={onClose}>
-              Close
-            </Button>
-          </div>
-          <div className="wi-modalBody">{children}</div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
 export default function MheTrainingSetup() {
-  const location = useLocation();
   const navigate = useNavigate();
-
+  const location = useLocation();
   const activeNav = useMemo(() => activeFromPath(location.pathname), [location.pathname]);
   const onSelectNav = (key) => navigate(pathFromKey(key));
 
   const [tab, setTab] = useState("register"); // register | history
+
+  // Hover tooltip (now includes full training history)
+  const [hoverTip, setHoverTip] = useState({
+    open: false,
+    x: 0,
+    y: 0,
+    colleagueId: "",
+    loading: false,
+    rows: [],
+  });
+
+  const hoverCacheRef = useRef(new Map()); // colleagueId -> rows[]
+  const hoverLastIdRef = useRef(""); // reduce re-fetch noise
+
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState({ type: "", message: "" });
 
+  // Header email + tenant boundary
   const [email, setEmail] = useState("");
-  const [userId, setUserId] = useState("");
+  const [accountId, setAccountId] = useState("");
 
-  // Tenanted reference data
-  const [allowedCompanies, setAllowedCompanies] = useState([]);
+  // Company enforcement (multi-company capable)
+  const [allowedCompanies, setAllowedCompanies] = useState([]); // [{id,name}]
+  const [companyId, setCompanyId] = useState("");
+
+  // Reference data
   const [sites, setSites] = useState([]);
   const [mheTypes, setMheTypes] = useState([]);
 
-  // Selection
-  const [companyId, setCompanyId] = useState("");
+  // Site + filters
   const [siteId, setSiteId] = useState("");
+  const [mheTypeFilter, setMheTypeFilter] = useState("ALL");
+  const [nameFilter, setNameFilter] = useState("");
 
-  // Filters
-  const [searchName, setSearchName] = useState("");
-  const [filterMheTypeId, setFilterMheTypeId] = useState("");
-
-  // Register data
+  // Data sets
   const [siteColleagues, setSiteColleagues] = useState([]);
   const [currentAuths, setCurrentAuths] = useState([]);
 
-  // History
+  // History tab
   const [historyColleagueId, setHistoryColleagueId] = useState("");
-  const [historyMheTypeId, setHistoryMheTypeId] = useState("");
+  const [historyMheTypeId, setHistoryMheTypeId] = useState("ALL");
   const [historyRows, setHistoryRows] = useState([]);
 
-  // Modals
-  const [addModal, setAddModal] = useState({
-    open: false,
-    colleague_id: "",
-    mhe_type_id: "",
-    trained_on: "",
-    expires_on: "",
-    notes: "",
-    fileName: "",
-    certificatePath: "",
-  });
+  // Upload (inline per auth)
+  const fileInputRef = useRef(null);
+  const [pendingUpload, setPendingUpload] = useState({ authId: "", colleagueId: "", mheTypeId: "" });
 
+  // Retrain modal
+  const retrainFileRef = useRef(null);
   const [retrainModal, setRetrainModal] = useState({
     open: false,
     auth: null,
     trained_on: "",
-    expires_on: "",
+    notes: "",
+    fileName: "",
+    certificatePath: "",
+    training_due: "",
+  });
+
+  // Add training modal
+  const addFileRef = useRef(null);
+  const [addModal, setAddModal] = useState({
+    open: false,
+    colleagueId: "",
+    mheTypeId: "",
+    trained_on: "",
+    training_due: "",
     notes: "",
     fileName: "",
     certificatePath: "",
   });
 
-  // Inline certificate upload (existing record)
-  const [pendingInlineUpload, setPendingInlineUpload] = useState({
-    authId: "",
-  });
+  const siteName = useMemo(() => sites.find((s) => s.id === siteId)?.name || "", [sites, siteId]);
 
-  const selectedCompanyName = useMemo(() => {
-    return (allowedCompanies || []).find((c) => c.id === companyId)?.name || "";
-  }, [allowedCompanies, companyId]);
+  const mheTypeNameById = useMemo(() => {
+    const map = new Map();
+    (mheTypes || []).forEach((t) => map.set(t.id, t.type_name));
+    return map;
+  }, [mheTypes]);
 
-  const sitesForSelectedCompany = useMemo(() => {
-    if (!companyId) return [];
-    return (sites || []).filter((s) => s.company_id === companyId);
-  }, [companyId, sites]);
+  const colleagueNameById = useMemo(() => {
+    const map = new Map();
+    (siteColleagues || []).forEach((c) => {
+      map.set(c.id, `${c.last_name}, ${c.first_name}`);
+    });
+    return map;
+  }, [siteColleagues]);
 
-  const selectedSiteName = useMemo(() => {
-    return sitesForSelectedCompany.find((s) => s.id === siteId)?.name || "";
-  }, [sitesForSelectedCompany, siteId]);
+  const resolveAccountId = useCallback(async (userId) => {
+    {
+      const { data, error } = await supabase.from("users").select("account_id").eq("id", userId).maybeSingle();
+      if (!error && data?.account_id) return data.account_id;
+    }
+    {
+      const { data, error } = await supabase
+        .from("company_users")
+        .select("account_id")
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      if (!error && data?.account_id) return data.account_id;
+    }
+    return "";
+  }, []);
 
-  // ---------- Auth ----------
+  // Init session
   useEffect(() => {
     (async () => {
-      setLoading(true);
-      setNotice({ type: "", message: "" });
-
       try {
+        setLoading(true);
+        setNotice({ type: "", message: "" });
+
         const { data: authData, error: authErr } = await supabase.auth.getUser();
         if (authErr) throw authErr;
 
         const user = authData?.user;
-        if (!user?.id) throw new Error("Not signed in.");
+        if (!user) {
+          navigate("/login", { replace: true });
+          return;
+        }
 
-        setUserId(user.id);
         setEmail(user.email || "");
+
+        const aId = await resolveAccountId(user.id);
+        if (!aId) {
+          setNotice({
+            type: "error",
+            message:
+              "Could not resolve account_id for this user. Ensure public.users (or company_users) contains account_id.",
+          });
+          return;
+        }
+        setAccountId(aId);
       } catch (e) {
-        setNotice({ type: "error", message: e?.message || "Failed to initialise MHE training." });
+        setNotice({ type: "error", message: e?.message || "Failed to initialise MHE Training." });
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [navigate, resolveAccountId]);
 
-  // ---------- Load memberships + reference data ----------
+  // Load allowed companies
   useEffect(() => {
-    if (!userId) return;
+    if (!accountId) return;
 
     (async () => {
-      setLoading(true);
-      setNotice({ type: "", message: "" });
-
       try {
-        // Companies available to this user
-        const { data: cuRows, error: cuErr } = await supabase
+        setLoading(true);
+
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw authErr;
+        const user = authData?.user;
+        if (!user) return;
+
+        const { data: mem, error: memErr } = await supabase
           .from("company_users")
-          .select("company_id")
-          .eq("user_id", userId);
+          .select("company_id, companies(name)")
+          .eq("account_id", accountId)
+          .eq("user_id", user.id);
 
-        if (cuErr) throw cuErr;
+        if (memErr) throw memErr;
 
-        const companyIds = Array.from(new Set((cuRows || []).map((r) => r.company_id).filter(Boolean)));
+        const membershipCompanies =
+          (mem || [])
+            .map((r) => ({ id: r.company_id, name: r?.companies?.name || "—" }))
+            .filter((x) => !!x.id) || [];
 
-        const [compRes, siteRes, mheRes] = await Promise.all([
-          companyIds.length
-            ? supabase.from("companies").select("id, name").in("id", companyIds).order("name", { ascending: true })
-            : Promise.resolve({ data: [], error: null }),
-          companyIds.length
-            ? supabase.from("sites").select("id, name, company_id").in("company_id", companyIds).order("name", { ascending: true })
-            : Promise.resolve({ data: [], error: null }),
-          supabase.from("mhe_types").select("id, type_name").order("type_name", { ascending: true }),
-        ]);
+        if (membershipCompanies.length > 0) {
+          setAllowedCompanies(membershipCompanies);
+          if (!companyId) setCompanyId(membershipCompanies[0].id);
+          return;
+        }
 
-        if (compRes.error) throw compRes.error;
-        if (siteRes.error) throw siteRes.error;
-        if (mheRes.error) throw mheRes.error;
+        const { data: allC, error: allErr } = await supabase
+          .from("companies")
+          .select("id, name")
+          .eq("account_id", accountId)
+          .order("name");
 
-        setAllowedCompanies(compRes.data || []);
-        setSites(siteRes.data || []);
-        setMheTypes(mheRes.data || []);
+        if (allErr) throw allErr;
 
-        const firstCompanyId = (compRes.data || [])[0]?.id || "";
-        setCompanyId((prev) => (prev && (compRes.data || []).some((c) => c.id === prev) ? prev : firstCompanyId));
+        setAllowedCompanies(allC || []);
+        if (!companyId && (allC || []).length) setCompanyId(allC[0].id);
+
+        setNotice({
+          type: "warning",
+          message:
+            "No companies assigned to this user in company_users for this account. Falling back to all companies in this account (add company_users rows to enforce memberships).",
+        });
       } catch (e) {
-        setNotice({ type: "error", message: e?.message || "Failed to load MHE reference data." });
-        setAllowedCompanies([]);
-        setSites([]);
-        setMheTypes([]);
-        setCompanyId("");
-        setSiteId("");
+        setNotice({ type: "error", message: e?.message || "Failed to load companies." });
       } finally {
         setLoading(false);
       }
     })();
-  }, [userId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
-  // Keep site selection valid when company changes
+  // Load sites + MHE types when company changes
   useEffect(() => {
     if (!companyId) {
+      setSites([]);
       setSiteId("");
       return;
     }
-    const companySites = (sites || []).filter((s) => s.company_id === companyId);
-    const firstSite = companySites[0]?.id || "";
-    setSiteId((prev) => (prev && companySites.some((s) => s.id === prev) ? prev : firstSite));
-  }, [companyId, sites]);
 
-  // ---------- Register refresh ----------
+    (async () => {
+      try {
+        setLoading(true);
+
+        const [{ data: st, error: es }, { data: mt, error: emt }] = await Promise.all([
+          supabase.from("sites").select("id, company_id, name").eq("company_id", companyId).order("name"),
+          supabase.from("mhe_types").select("id, type_name, inspection_cycle_days").order("type_name"),
+        ]);
+
+        if (es) throw es;
+        if (emt) throw emt;
+
+        setSites(st || []);
+        setMheTypes(mt || []);
+
+        setSiteId((prev) => {
+          if (prev && (st || []).some((s) => s.id === prev)) return prev;
+          return st?.[0]?.id || "";
+        });
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Failed to load reference data." });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [companyId]);
+
+  // Save manual due date
+  const updateTrainingDue = useCallback(async (authId, ymd) => {
+    setNotice({ type: "", message: "" });
+
+    const clean = (ymd || "").trim();
+    const value = clean === "" ? null : clean;
+
+    if (value && !isValidYMD(value)) {
+      setNotice({ type: "error", message: "Training due date must be a valid date." });
+      return;
+    }
+
+    const { error } = await supabase
+      .from("colleague_mhe_authorisations")
+      .update({ expires_on: value })
+      .eq("id", authId);
+
+    if (error) {
+      setNotice({ type: "error", message: error.message || "Failed to update training due date." });
+      return;
+    }
+
+    setCurrentAuths((prev) => (prev || []).map((a) => (a.id === authId ? { ...a, training_due: value } : a)));
+  }, []);
+
+  /**
+   * IMPORTANT FIX:
+   * We DO NOT use v_mhe_authorisations_currents for the register because it does not include
+   * base-table id/training_due (as per your screenshot). We load ACTIVE records directly from
+   * colleague_mhe_authorisations so training_due updates persist.
+   */
   const refreshRegisterData = useCallback(async () => {
     if (!siteId) {
       setSiteColleagues([]);
@@ -267,175 +355,353 @@ export default function MheTrainingSetup() {
       return;
     }
 
+    // Colleagues
     const { data: cData, error: cErr } = await supabase
       .from("colleagues")
-      .select("id, first_name, last_name, employment_type, active, site_id")
+      .select("id, first_name, last_name, employment_type, active")
       .eq("site_id", siteId)
       .order("last_name", { ascending: true });
 
     if (cErr) throw cErr;
 
-    const activeOnly = (cData || []).filter((c) => c.active !== false);
+    const activeOnly = (cData || []).filter((c) => c.active === true);
     setSiteColleagues(activeOnly);
 
-    // Read from current view (DO NOT filter by account_id)
-    const { data: aData, error: aErr } = await supabase
-      .from("v_mhe_authorisations_current")
-      .select("*")
+    // Current active authorisations (base table, with id + training_due)
+    const { data: aRows, error: aErr } = await supabase
+      .from("colleague_mhe_authorisations")
+     .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path")
+
       .eq("site_id", siteId)
-      .order("last_name", { ascending: true });
+      .eq("status", "ACTIVE")
+      .order("trained_on", { ascending: false });
 
     if (aErr) throw aErr;
-    setCurrentAuths(aData || []);
-  }, [siteId]);
 
-  // ---------- History refresh ----------
-  const refreshHistoryData = useCallback(async () => {
-    if (!historyColleagueId) {
-      setHistoryRows([]);
-      return;
+    // Enrich with mhe type name (from loaded mheTypes, fallback to direct fetch if needed)
+    const localMap = new Map((mheTypes || []).map((t) => [t.id, t.type_name]));
+    let useRows = aRows || [];
+
+    // If types not loaded yet, do a minimal fetch once
+    if (useRows.length && localMap.size === 0) {
+      const { data: mt, error: mtErr } = await supabase.from("mhe_types").select("id, type_name");
+      if (!mtErr && mt) mt.forEach((t) => localMap.set(t.id, t.type_name));
     }
 
-    let q = supabase
-      .from("colleague_mhe_authorisations")
-      .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path, notes, created_at")
-      .eq("colleague_id", historyColleagueId)
-      .order("created_at", { ascending: false });
+    useRows = useRows.map((r) => ({
+  ...r,
+  training_due: r.expires_on, // UI uses training_due label
+  mhe_type: localMap.get(r.mhe_type_id) || r.mhe_type_id,
+}));
 
-    if (historyMheTypeId) q = q.eq("mhe_type_id", historyMheTypeId);
+    setCurrentAuths(useRows);
 
-    const { data, error } = await q;
-    if (error) throw error;
+    if (!historyColleagueId && activeOnly.length) setHistoryColleagueId(activeOnly[0].id);
+  }, [siteId, mheTypes, historyColleagueId]);
 
-    setHistoryRows(data || []);
-  }, [historyColleagueId, historyMheTypeId]);
-
-  // Refresh data on tab/site changes
   useEffect(() => {
-    if (tab !== "register") return;
     (async () => {
       try {
         await refreshRegisterData();
       } catch (e) {
-        setNotice({ type: "error", message: e?.message || "Failed to load training register." });
+        setNotice({ type: "error", message: e?.message || "Failed to load site training data." });
       }
     })();
-  }, [tab, refreshRegisterData, siteId]);
+  }, [refreshRegisterData]);
 
-  useEffect(() => {
-    if (tab !== "history") return;
-    (async () => {
-      try {
-        await refreshHistoryData();
-      } catch (e) {
-        setNotice({ type: "error", message: e?.message || "Failed to load audit history." });
-      }
-    })();
-  }, [tab, refreshHistoryData]);
-
-  // ---------- Filters ----------
-  const filteredAuths = useMemo(() => {
-    const s = toLowerTrim(searchName);
-    const t = filterMheTypeId;
-
-    return (currentAuths || []).filter((a) => {
-      if (t && a.mhe_type_id !== t) return false;
-      if (s) {
-        const full = `${a.first_name || ""} ${a.last_name || ""}`.toLowerCase();
-        if (!full.includes(s)) return false;
-      }
-      return true;
+  // Group current auths by colleague
+  const authsByColleague = useMemo(() => {
+    const map = new Map();
+    (currentAuths || []).forEach((a) => {
+      const arr = map.get(a.colleague_id) || [];
+      arr.push(a);
+      map.set(a.colleague_id, arr);
     });
-  }, [currentAuths, searchName, filterMheTypeId]);
 
-  const dueSoon = useMemo(() => {
-    return (filteredAuths || []).filter((a) => {
-      const d = Number(a.days_to_expiry);
-      return Number.isFinite(d) && d <= 30;
+    // Sort by training_due then trained_on
+    map.forEach((arr, key) => {
+      arr.sort((x, y) => {
+        const dx = String(x.training_due || "");
+        const dy = String(y.training_due || "");
+        const c = dx.localeCompare(dy);
+        if (c !== 0) return c;
+        return String(y.trained_on || "").localeCompare(String(x.trained_on || ""));
+      });
+      map.set(key, arr);
     });
-  }, [filteredAuths]);
 
-  const normalList = useMemo(() => {
-    const dueIds = new Set((dueSoon || []).map((a) => a.id));
-    return (filteredAuths || []).filter((a) => !dueIds.has(a.id));
-  }, [filteredAuths, dueSoon]);
+    return map;
+  }, [currentAuths]);
 
-  // ---------- Storage ----------
-  const uploadCertificate = async (file, prefix = "mhe_certificates") => {
-    if (!file) return { path: "" };
-    const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-    const key = `${prefix}/${siteId}/${Date.now()}_${safeName}`;
+  const fetchHoverHistory = useCallback(
+    async (colleagueId) => {
+      if (hoverCacheRef.current.has(colleagueId)) {
+        const rows = hoverCacheRef.current.get(colleagueId) || [];
+        setHoverTip((h) => ({ ...h, loading: false, rows }));
+        return;
+      }
 
-    const { error } = await supabase.storage.from("certificates").upload(key, file, { upsert: true });
-    if (error) throw error;
+      setHoverTip((h) => ({ ...h, loading: true, rows: [] }));
 
-    return { path: key };
+      const { data, error } = await supabase
+        .from("colleague_mhe_authorisations")
+        .select("id, mhe_type_id, trained_on, expires_on, status, certificate_path, created_at")
+        .eq("colleague_id", colleagueId)
+        .order("trained_on", { ascending: false });
+
+      if (error) {
+        setHoverTip((h) => ({ ...h, loading: false, rows: [] }));
+        return;
+      }
+
+      const rows =
+  (data || []).map((r) => ({
+    ...r,
+    training_due: r.expires_on,
+    mhe_type: mheTypeNameById.get(r.mhe_type_id) || r.mhe_type_id,
+  })) || [];
+
+
+      hoverCacheRef.current.set(colleagueId, rows);
+      setHoverTip((h) => ({ ...h, loading: false, rows }));
+    },
+    [mheTypeNameById]
+  );
+
+  const moveHoverTip = useCallback(
+    (e, colleagueId) => {
+      const boxW = 520;
+      const boxH = 360;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let x = e.clientX + 14;
+      let y = e.clientY + 14;
+
+      if (x + boxW + 14 > vw) x = e.clientX - boxW - 14;
+      if (y + boxH + 14 > vh) y = e.clientY - boxH - 14;
+
+      setHoverTip((prev) => ({
+        ...prev,
+        open: true,
+        x,
+        y,
+        colleagueId,
+      }));
+
+      // Prevent repeated fetch spam while moving within same card
+      if (hoverLastIdRef.current !== colleagueId) {
+        hoverLastIdRef.current = colleagueId;
+        fetchHoverHistory(colleagueId);
+      } else if (hoverCacheRef.current.has(colleagueId)) {
+        const rows = hoverCacheRef.current.get(colleagueId) || [];
+        setHoverTip((h) => ({ ...h, loading: false, rows }));
+      }
+    },
+    [fetchHoverHistory]
+  );
+
+  const closeHoverTip = () => {
+    hoverLastIdRef.current = "";
+    setHoverTip({ open: false, x: 0, y: 0, colleagueId: "", loading: false, rows: [] });
   };
 
-  // ---------- Add record ----------
-  const addFileRef = useRef(null);
+  // Outstanding list:
+  // - Hide 0-training colleagues from the register
+  // - Show only colleagues with training outstanding
+  const colleagueRows = useMemo(() => {
+    const nf = safeLower(nameFilter);
 
-  const openAdd = () => {
+    const rows = (siteColleagues || [])
+      .map((c) => {
+        const list = authsByColleague.get(c.id) || [];
+        const hasAnyTraining = list.length > 0;
+
+        const visibleAuths = mheTypeFilter === "ALL" ? list : list.filter((a) => a.mhe_type_id === mheTypeFilter);
+
+        let outstanding = false;
+        let minDays = 999999;
+
+        if (!hasAnyTraining) {
+          // requirement: do not show 0-training colleagues in this view
+          outstanding = false;
+          minDays = 999999;
+        } else if (visibleAuths.length === 0) {
+          outstanding = mheTypeFilter !== "ALL";
+          minDays = outstanding ? -999999 : 999999;
+        } else {
+          for (const a of visibleAuths) {
+            if (!a.training_due) {
+              outstanding = true;
+              minDays = Math.min(minDays, 0);
+              continue;
+            }
+            const d = daysUntil(a.training_due);
+            if (d != null) minDays = Math.min(minDays, d);
+            if (d == null) outstanding = true;
+            else if (d <= OUTSTANDING_DAYS) outstanding = true;
+          }
+        }
+
+        return {
+          ...c,
+          _auths: list,
+          _hasAnyTraining: hasAnyTraining,
+          _visibleAuths: visibleAuths,
+          _outstanding: outstanding,
+          _minDays: minDays,
+        };
+      })
+      .filter((c) => {
+        if (!nf) return true;
+        const full = `${c.first_name || ""} ${c.last_name || ""}`.toLowerCase();
+        const rev = `${c.last_name || ""} ${c.first_name || ""}`.toLowerCase();
+        return full.includes(nf) || rev.includes(nf);
+      })
+      .filter((c) => c._hasAnyTraining === true);
+
+    rows.sort((a, b) => {
+      if (a._minDays !== b._minDays) return a._minDays - b._minDays;
+      const ln = (a.last_name || "").localeCompare(b.last_name || "");
+      if (ln !== 0) return ln;
+      return (a.first_name || "").localeCompare(b.first_name || "");
+    });
+
+    return rows;
+  }, [siteColleagues, authsByColleague, nameFilter, mheTypeFilter]);
+
+  // ---- Upload certificate for existing auth ----
+  const beginUpload = (authRow) => {
+    setNotice({ type: "", message: "" });
+    setPendingUpload({ authId: authRow.id, colleagueId: authRow.colleague_id, mheTypeId: authRow.mhe_type_id });
+    fileInputRef.current?.click();
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setNotice({ type: "", message: "" });
+
+    try {
+      if (!pendingUpload.authId) throw new Error("No authorisation selected for upload.");
+      if (!companyId) throw new Error("No company selected.");
+
+      const path = `company/${companyId}/colleague/${pendingUpload.colleagueId}/mhe/${pendingUpload.mheTypeId}/${Date.now()}_${file.name}`;
+
+      const { error: upErr } = await supabase.storage.from("mhe-certificates").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (upErr) throw upErr;
+
+      const { error: dbErr } = await supabase
+        .from("colleague_mhe_authorisations")
+        .update({ certificate_path: path })
+        .eq("id", pendingUpload.authId);
+      if (dbErr) throw dbErr;
+
+      hoverCacheRef.current.delete(pendingUpload.colleagueId);
+
+      setNotice({ type: "success", message: "Certificate uploaded." });
+      await refreshRegisterData();
+    } catch (err) {
+      setNotice({ type: "error", message: err?.message || "Failed to upload certificate." });
+    } finally {
+      setLoading(false);
+      setPendingUpload({ authId: "", colleagueId: "", mheTypeId: "" });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // ---- Add training (NEW) ----
+ 
+
+  const openAddTraining = (colleagueIdArg = "") => {
+    setNotice({ type: "", message: "" });
     setAddModal({
       open: true,
-      colleague_id: "",
-      mhe_type_id: "",
+      colleagueId: colleagueIdArg || (siteColleagues[0]?.id || ""),
+      mheTypeId: mheTypes[0]?.id || "",
       trained_on: "",
-      expires_on: "",
+      training_due: "",
       notes: "",
       fileName: "",
       certificatePath: "",
     });
   };
 
-  const closeAdd = () => setAddModal((p) => ({ ...p, open: false }));
+  const closeAddTraining = () => {
+    setAddModal({
+      open: false,
+      colleagueId: "",
+      mheTypeId: "",
+      trained_on: "",
+      training_due: "",
+      notes: "",
+      fileName: "",
+      certificatePath: "",
+    });
+  };
 
-  const onAddFileChange = async (e) => {
+  const handleAddFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setAddModal((p) => ({ ...p, fileName: file.name }));
+    setNotice({ type: "", message: "" });
+    setLoading(true);
 
     try {
-      setLoading(true);
-      const { path } = await uploadCertificate(file, "mhe_certificates");
-      setAddModal((p) => ({ ...p, certificatePath: path }));
-      setNotice({ type: "success", message: "Certificate uploaded." });
+      if (!companyId) throw new Error("No company selected.");
+      if (!addModal.colleagueId) throw new Error("Select a colleague first.");
+      if (!addModal.mheTypeId) throw new Error("Select an MHE type first.");
+
+      const path = `company/${companyId}/colleague/${addModal.colleagueId}/mhe/${addModal.mheTypeId}/${Date.now()}_${file.name}`;
+
+      const { error: upErr } = await supabase.storage.from("mhe-certificates").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (upErr) throw upErr;
+
+      setAddModal((m) => ({ ...m, fileName: file.name, certificatePath: path }));
     } catch (err) {
       setNotice({ type: "error", message: err?.message || "Failed to upload certificate." });
-      setAddModal((p) => ({ ...p, certificatePath: "" }));
     } finally {
       setLoading(false);
-      e.target.value = "";
+      if (addFileRef.current) addFileRef.current.value = "";
     }
   };
 
-  const submitAdd = async () => {
+  const submitAddTraining = async () => {
     setNotice({ type: "", message: "" });
 
-    if (!companyId) return setNotice({ type: "error", message: "Select a company first." });
-    if (!siteId) return setNotice({ type: "error", message: "Select a site first." });
-    if (!addModal.colleague_id) return setNotice({ type: "error", message: "Colleague is required." });
-    if (!addModal.mhe_type_id) return setNotice({ type: "error", message: "MHE type is required." });
-
+    if (!addModal.colleagueId) return setNotice({ type: "error", message: "Colleague is required." });
+    if (!addModal.mheTypeId) return setNotice({ type: "error", message: "MHE type is required." });
     if (!addModal.trained_on || !isValidYMD(addModal.trained_on)) {
       return setNotice({ type: "error", message: "Trained on date is required." });
     }
-    if (!addModal.expires_on || !isValidYMD(addModal.expires_on)) {
-      return setNotice({ type: "error", message: "Next training due date is required." });
-    }
+    if (!addModal.training_due || !isValidYMD(addModal.training_due)) {
+  return setNotice({ type: "error", message: "Training due date is required." });
+}
+
 
     setLoading(true);
     try {
-      // INSERT TARGET ("sheet"):
-      // public.colleague_mhe_authorisations
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr) throw authErr;
+      const userId = authData?.user?.id || null;
+
       const payload = {
+        company_id: companyId,
         site_id: siteId,
-        colleague_id: addModal.colleague_id,
-        mhe_type_id: addModal.mhe_type_id,
+        colleague_id: addModal.colleagueId,
+        mhe_type_id: addModal.mheTypeId,
         trained_on: addModal.trained_on,
-        expires_on: addModal.expires_on, // manual next due
+        expires_on: addModal.training_due || null,
         status: "ACTIVE",
+        signed_off_by: userId,
         certificate_path: addModal.certificatePath || null,
         notes: addModal.notes.trim() || null,
       };
@@ -443,61 +709,28 @@ export default function MheTrainingSetup() {
       const { error: insErr } = await supabase.from("colleague_mhe_authorisations").insert(payload);
       if (insErr) throw insErr;
 
-      setNotice({ type: "success", message: "Training record added." });
-      closeAdd();
+      hoverCacheRef.current.delete(addModal.colleagueId);
+
+      setNotice({ type: "success", message: "Training record created." });
+      closeAddTraining();
       await refreshRegisterData();
     } catch (e) {
-      setNotice({ type: "error", message: e?.message || "Failed to add training record." });
+      setNotice({ type: "error", message: e?.message || "Failed to create training record." });
     } finally {
       setLoading(false);
     }
   };
 
-  // ---------- Inline certificate upload ----------
-  const inlineFileRef = useRef(null);
+  // ---- Retrain ----
 
-  const openInlineUpload = (authId) => {
-    setPendingInlineUpload({ authId });
-    setTimeout(() => inlineFileRef.current?.click(), 0);
-  };
-
-  const onInlineFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    const authId = pendingInlineUpload.authId;
-
-    if (!file || !authId) return;
-
-    try {
-      setLoading(true);
-      const { path } = await uploadCertificate(file, "mhe_certificates");
-
-      const { error } = await supabase
-        .from("colleague_mhe_authorisations")
-        .update({ certificate_path: path })
-        .eq("id", authId);
-
-      if (error) throw error;
-
-      setNotice({ type: "success", message: "Certificate attached." });
-      await refreshRegisterData();
-    } catch (err) {
-      setNotice({ type: "error", message: err?.message || "Failed to attach certificate." });
-    } finally {
-      setLoading(false);
-      setPendingInlineUpload({ authId: "" });
-      e.target.value = "";
-    }
-  };
-
-  // ---------- Retrain ----------
-  const retrainFileRef = useRef(null);
 
   const openRetrain = (authRow) => {
+    setNotice({ type: "", message: "" });
     setRetrainModal({
       open: true,
       auth: authRow,
       trained_on: "",
-      expires_on: "",
+      training_due: "",
       notes: "",
       fileName: "",
       certificatePath: "",
@@ -509,66 +742,95 @@ export default function MheTrainingSetup() {
       open: false,
       auth: null,
       trained_on: "",
-      expires_on: "",
+      training_due: "",
       notes: "",
       fileName: "",
       certificatePath: "",
     });
   };
 
-  const onRetrainFileChange = async (e) => {
+  const handleRetrainFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setRetrainModal((p) => ({ ...p, fileName: file.name }));
+    setNotice({ type: "", message: "" });
+    setLoading(true);
 
     try {
-      setLoading(true);
-      const { path } = await uploadCertificate(file, "mhe_certificates");
-      setRetrainModal((p) => ({ ...p, certificatePath: path }));
-      setNotice({ type: "success", message: "Certificate uploaded." });
+      if (!retrainModal.auth) throw new Error("No authorisation selected.");
+      if (!companyId) throw new Error("No company selected.");
+
+      const a = retrainModal.auth;
+
+      const path = `company/${companyId}/colleague/${a.colleague_id}/mhe/${a.mhe_type_id}/${Date.now()}_${file.name}`;
+
+      const { error: upErr } = await supabase.storage.from("mhe-certificates").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (upErr) throw upErr;
+
+      setRetrainModal((m) => ({ ...m, fileName: file.name, certificatePath: path }));
     } catch (err) {
-      setNotice({ type: "error", message: err?.message || "Failed to upload certificate." });
-      setRetrainModal((p) => ({ ...p, certificatePath: "" }));
+      setNotice({ type: "error", message: err?.message || "Failed to upload retrain certificate." });
     } finally {
       setLoading(false);
-      e.target.value = "";
+      if (retrainFileRef.current) retrainFileRef.current.value = "";
     }
   };
+
+  const refreshHistory = useCallback(async () => {
+    if (!historyColleagueId) {
+      setHistoryRows([]);
+      return;
+    }
+
+    let q = supabase
+      .from("colleague_mhe_authorisations")
+      .select("id, mhe_type_id, trained_on, expires_on, status, certificate_path, notes, signed_off_at, created_at")
+      .eq("colleague_id", historyColleagueId)
+      .order("trained_on", { ascending: false });
+
+    if (historyMheTypeId !== "ALL") q = q.eq("mhe_type_id", historyMheTypeId);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    setHistoryRows((data || []).map(r => ({ ...r, training_due: r.expires_on })));
+  }, [historyColleagueId, historyMheTypeId]);
 
   const submitRetrain = async () => {
     setNotice({ type: "", message: "" });
 
     const a = retrainModal.auth;
-    if (!a) return;
-
-    if (!siteId) return setNotice({ type: "error", message: "Select a site first." });
+    if (!a) return setNotice({ type: "error", message: "No authorisation selected." });
 
     if (!retrainModal.trained_on || !isValidYMD(retrainModal.trained_on)) {
       return setNotice({ type: "error", message: "Trained on date is required." });
     }
-    if (!retrainModal.expires_on || !isValidYMD(retrainModal.expires_on)) {
-      return setNotice({ type: "error", message: "Next training due date is required." });
+    if (retrainModal.training_due && !isValidYMD(retrainModal.training_due)) {
+      return setNotice({ type: "error", message: "Training due date must be a valid date (or blank)." });
     }
 
     setLoading(true);
     try {
-      // Expire old
-      const { error: upErr } = await supabase
-        .from("colleague_mhe_authorisations")
-        .update({ status: "EXPIRED" })
-        .eq("id", a.id);
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr) throw authErr;
+      const userId = authData?.user?.id || null;
 
-      if (upErr) throw upErr;
+      // revoke existing
+      const { error: revErr } = await supabase.from("colleague_mhe_authorisations").update({ status: "REVOKED" }).eq("id", a.id);
+      if (revErr) throw revErr;
 
-      // Insert new ACTIVE
+      // insert new ACTIVE
       const payload = {
+        company_id: companyId,
         site_id: siteId,
         colleague_id: a.colleague_id,
         mhe_type_id: a.mhe_type_id,
         trained_on: retrainModal.trained_on,
-        expires_on: retrainModal.expires_on,
+        expires_on: retrainModal.training_due || null,
         status: "ACTIVE",
+        signed_off_by: userId,
         certificate_path: retrainModal.certificatePath || null,
         notes: retrainModal.notes.trim() || null,
       };
@@ -576,9 +838,12 @@ export default function MheTrainingSetup() {
       const { error: insErr } = await supabase.from("colleague_mhe_authorisations").insert(payload);
       if (insErr) throw insErr;
 
-      setNotice({ type: "success", message: "Retraining recorded." });
+      hoverCacheRef.current.delete(a.colleague_id);
+
+      setNotice({ type: "success", message: "Retraining recorded. History preserved." });
       closeRetrain();
       await refreshRegisterData();
+      if (tab === "history") await refreshHistory();
     } catch (e) {
       setNotice({ type: "error", message: e?.message || "Failed to record retraining." });
     } finally {
@@ -586,465 +851,515 @@ export default function MheTrainingSetup() {
     }
   };
 
-  // ---------- Options ----------
-  const companyOptions = useMemo(() => {
-    return (allowedCompanies || []).map((c) => ({ value: c.id, label: c.name }));
-  }, [allowedCompanies]);
-
-  const siteOptions = useMemo(() => {
-    return (sitesForSelectedCompany || []).map((s) => ({ value: s.id, label: s.name }));
-  }, [sitesForSelectedCompany]);
-
-  const mheTypeOptions = useMemo(() => {
-    return (mheTypes || []).map((t) => ({ value: t.id, label: t.type_name }));
-  }, [mheTypes]);
-
-  const colleagueOptions = useMemo(() => {
-    return (siteColleagues || []).map((c) => ({
-      value: c.id,
-      label: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
-    }));
-  }, [siteColleagues]);
-
-  const renderNotice = () => {
-    if (!notice?.message) return null;
-    const cls = notice.type === "error" ? "wi-alert wi-alert--error" : "wi-alert wi-alert--success";
-    return <div className={cls}>{notice.message}</div>;
-  };
+  useEffect(() => {
+    if (tab !== "history") return;
+    (async () => {
+      try {
+        await refreshHistory();
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Failed to load training history." });
+      }
+    })();
+  }, [tab, refreshHistory]);
 
   return (
-    <AppLayout
-      activeNav={activeNav}
-      onSelectNav={onSelectNav}
-      headerTitle="MHE training tracker"
-      headerSubtitle={`Company: ${selectedCompanyName || "—"} · Site: ${selectedSiteName || "—"}`}
-      headerRight={
-        <div className="wi-headerRight">
-          <div className="wi-headerEmail">{email}</div>
+    <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
+      <div className="wi-page wi-mheTrainingPage">
+        <div className="wi-pageHeader">
+          <h1 className="wi-pageTitle">MHE training tracker</h1>
+          <div className="wi-pageSubtitle">
+            Company: <strong>{(allowedCompanies || []).find((c) => c.id === companyId)?.name || "—"}</strong>
+            {siteName ? (
+              <>
+                {" "}
+                • Site: <strong>{siteName}</strong>
+              </>
+            ) : null}
+          </div>
         </div>
-      }
-    >
-      <div className="wi-page">
-        {renderNotice()}
 
-        <div className="wi-topControls">
-          <Card>
-            <div className="wi-controlsRow">
-              <div className="wi-control">
-                <label className="wi-label">Company</label>
-                <select
-                  className="wi-field"
-                  value={companyId}
-                  onChange={(e) => setCompanyId(e.target.value)}
-                  disabled={loading}
-                >
-                  <option value="">Select company…</option>
-                  {companyOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        {notice.message && <div className={`wi-alert wi-alert--${notice.type || "info"}`}>{notice.message}</div>}
 
-              <div className="wi-control">
-                <label className="wi-label">Site</label>
-                <select className="wi-field" value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={loading || !companyId}>
-                  <option value="">Select site…</option>
-                  {siteOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="wi-control wi-control--tabs">
-                <Button variant={tab === "register" ? "primary" : "secondary"} onClick={() => setTab("register")} disabled={loading}>
-                  Training register
-                </Button>
-                <Button variant={tab === "history" ? "primary" : "secondary"} onClick={() => setTab("history")} disabled={loading}>
-                  Audit history
-                </Button>
-              </div>
-
-              {tab === "register" && (
-                <div className="wi-control wi-control--actions">
-                  <Button variant="secondary" onClick={refreshRegisterData} disabled={loading || !siteId}>
-                    Refresh
-                  </Button>
-                  <Button variant="primary" onClick={openAdd} disabled={loading || !siteId}>
-                    Add training record
-                  </Button>
-                </div>
-              )}
-            </div>
-          </Card>
+        <div className="wi-formGrid" style={{ marginBottom: 10 }}>
+          <div className="wi-field wi-span2">
+            <label className="wi-label">Company</label>
+            <select
+              className="wi-input"
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                closeHoverTip();
+                hoverCacheRef.current.clear();
+              }}
+              disabled={loading || allowedCompanies.length <= 1}
+            >
+              <option value="">{allowedCompanies.length ? "Select company…" : "Loading…"}</option>
+              {allowedCompanies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        <div className="wi-tabsRow">
+          <button className={`wi-tabPill ${tab === "register" ? "active" : ""}`} onClick={() => setTab("register")} type="button">
+            Training register
+          </button>
+          <button className={`wi-tabPill ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")} type="button">
+            Audit history
+          </button>
+        </div>
+
+        {/* Hidden file inputs */}
+        <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleUploadFile} />
+        <input ref={retrainFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleRetrainFile} />
+        <input ref={addFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleAddFile} />
 
         {tab === "register" && (
-          <Card>
-            <div className="wi-registerHeader">
-              <div>
-                <h3 className="wi-h3">Training register</h3>
-                <div className="wi-muted">
-                  Due soon colleagues (≤ 30 days to next training due) are shown at the top.
-                </div>
-              </div>
-
-              <div className="wi-registerFilters">
-                <div className="wi-control">
-                  <label className="wi-label">Search colleague</label>
-                  <input
-                    className="wi-field"
-                    value={searchName}
-                    onChange={(e) => setSearchName(e.target.value)}
-                    placeholder="Name…"
-                  />
-                </div>
-
-                <div className="wi-control">
-                  <label className="wi-label">Filter MHE type</label>
-                  <select className="wi-field" value={filterMheTypeId} onChange={(e) => setFilterMheTypeId(e.target.value)}>
-                    <option value="">All types</option>
-                    {mheTypeOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div className="wi-section">
-              <h4 className="wi-h4">Due soon</h4>
-              {dueSoon.length === 0 ? (
-                <div className="wi-muted">No colleagues are due within 30 days.</div>
-              ) : (
-                <div className="wi-tableWrap">
-                  <table className="wi-table">
-                    <thead>
-                      <tr>
-                        <th>Colleague</th>
-                        <th>Employment</th>
-                        <th>MHE type</th>
-                        <th>Trained on</th>
-                        <th>Next due</th>
-                        <th>Days</th>
-                        <th>Certificate</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dueSoon.map((a) => (
-                        <tr key={a.id}>
-                          <td>{`${a.first_name || ""} ${a.last_name || ""}`}</td>
-                          <td>{a.employment_type || ""}</td>
-                          <td>{a.mhe_type || ""}</td>
-                          <td>{a.trained_on || ""}</td>
-                          <td>{a.expires_on || ""}</td>
-                          <td>{a.days_to_expiry ?? ""}</td>
-                          <td>{a.certificate_path ? "Yes" : "No"}</td>
-                          <td className="wi-rowActions">
-                            <Button variant="secondary" onClick={() => openInlineUpload(a.id)} disabled={loading}>
-                              Upload cert
-                            </Button>
-                            <Button variant="primary" onClick={() => openRetrain(a)} disabled={loading}>
-                              Retrain
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <div className="wi-section">
-              <h4 className="wi-h4">All current</h4>
-              {normalList.length === 0 ? (
-                <div className="wi-muted">No trained colleagues match the current filters.</div>
-              ) : (
-                <div className="wi-tableWrap">
-                  <table className="wi-table">
-                    <thead>
-                      <tr>
-                        <th>Colleague</th>
-                        <th>Employment</th>
-                        <th>MHE type</th>
-                        <th>Trained on</th>
-                        <th>Next due</th>
-                        <th>Days</th>
-                        <th>Certificate</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {normalList.map((a) => (
-                        <tr key={a.id}>
-                          <td>{`${a.first_name || ""} ${a.last_name || ""}`}</td>
-                          <td>{a.employment_type || ""}</td>
-                          <td>{a.mhe_type || ""}</td>
-                          <td>{a.trained_on || ""}</td>
-                          <td>{a.expires_on || ""}</td>
-                          <td>{a.days_to_expiry ?? ""}</td>
-                          <td>{a.certificate_path ? "Yes" : "No"}</td>
-                          <td className="wi-rowActions">
-                            <Button variant="secondary" onClick={() => openInlineUpload(a.id)} disabled={loading}>
-                              Upload cert
-                            </Button>
-                            <Button variant="primary" onClick={() => openRetrain(a)} disabled={loading}>
-                              Retrain
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </Card>
-        )}
-
-        {tab === "history" && (
-          <Card>
-            <div className="wi-historyHeader">
-              <div>
-                <h3 className="wi-h3">Audit history</h3>
-                <div className="wi-muted">View training history (including expired records).</div>
-              </div>
-            </div>
-
-            <div className="wi-historyFilters">
-              <div className="wi-control">
-                <label className="wi-label">Colleague</label>
-                <select
-                  className="wi-field"
-                  value={historyColleagueId}
-                  onChange={(e) => setHistoryColleagueId(e.target.value)}
-                  disabled={loading || !siteId}
-                >
-                  <option value="">Select colleague…</option>
-                  {colleagueOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="wi-control">
-                <label className="wi-label">MHE type</label>
-                <select
-                  className="wi-field"
-                  value={historyMheTypeId}
-                  onChange={(e) => setHistoryMheTypeId(e.target.value)}
-                  disabled={loading || !historyColleagueId}
-                >
-                  <option value="">All types</option>
-                  {mheTypeOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="wi-control wi-control--actions">
-                <Button variant="secondary" onClick={refreshHistoryData} disabled={loading || !historyColleagueId}>
+          <Card
+            title="Training register"
+            subtitle="Only colleagues with training outstanding are shown (colleagues with zero training records are hidden here and can be added via ‘Add training’)."
+            actions={
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Button variant="primary" onClick={() => openAddTraining("")} disabled={loading || !siteColleagues.length}>
+                  Add training
+                </Button>
+                <Button variant="primary" onClick={refreshRegisterData} disabled={loading}>
                   Refresh
                 </Button>
               </div>
+            }
+          >
+            <div className="wi-formGrid">
+              <div className="wi-field wi-span2">
+                <label className="wi-label">Site</label>
+                <select
+                  className="wi-input"
+                  value={siteId}
+                  onChange={(e) => {
+                    setSiteId(e.target.value);
+                    closeHoverTip();
+                    hoverCacheRef.current.clear();
+                  }}
+                  disabled={loading || !companyId}
+                >
+                  <option value="">{companyId ? "Select site…" : "Select a company first…"}</option>
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Search colleague</label>
+                <input className="wi-input" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Name…" disabled={loading} />
+              </div>
+
+              <div className="wi-field">
+                <label className="wi-label">Filter MHE type</label>
+                <select className="wi-input" value={mheTypeFilter} onChange={(e) => setMheTypeFilter(e.target.value)} disabled={loading}>
+                  <option value="ALL">All types</option>
+                  {mheTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.type_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            {historyRows.length === 0 ? (
-              <div className="wi-muted">No history records found.</div>
-            ) : (
-              <div className="wi-tableWrap">
-                <table className="wi-table">
-                  <thead>
-                    <tr>
-                      <th>Created</th>
-                      <th>Trained on</th>
-                      <th>Next due</th>
-                      <th>Status</th>
-                      <th>Certificate</th>
-                      <th>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historyRows.map((r) => (
-                      <tr key={r.id}>
-                        <td>{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</td>
-                        <td>{r.trained_on || ""}</td>
-                        <td>{r.expires_on || ""}</td>
-                        <td>{r.status || ""}</td>
-                        <td>{r.certificate_path ? "Yes" : "No"}</td>
-                        <td>{r.notes || ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="wi-registerList">
+              {colleagueRows.length === 0 ? (
+                <div className="wi-muted">No colleagues currently have training outstanding for the selected filters.</div>
+              ) : (
+                colleagueRows.map((c) => (
+                  <div
+                    key={c.id}
+                    className="wi-colleagueBlock is-dueSoon"
+                    // IMPORTANT FIX: hover triggers anywhere over the colleague block
+                    onMouseEnter={(e) => moveHoverTip(e, c.id)}
+                    onMouseMove={(e) => moveHoverTip(e, c.id)}
+                    onMouseLeave={closeHoverTip}
+                  >
+                    <div className="wi-colleagueHeader">
+                      <div className="wi-colleagueName">
+                        {c.last_name}, {c.first_name}
+                        <span className="wi-colleagueMeta">({c.employment_type})</span>
+                      </div>
+
+                      <div className="wi-colleagueBadges">
+                        <span className="wi-badge wi-badge--danger">Outstanding</span>
+                        <span className="wi-badge">{c._auths.length} authorisation(s)</span>
+                        <Button variant="primary" onClick={() => openAddTraining(c.id)} disabled={loading}>
+                          Add training
+                        </Button>
+                      </div>
+                    </div>
+
+                    {c._visibleAuths.length === 0 ? (
+                      <div className="wi-muted" style={{ padding: "8px 0" }}>
+                        No active authorisations for the selected MHE type (training required).
+                      </div>
+                    ) : (
+                      <div className="wi-tableWrap">
+                        <table className="wi-table">
+                          <thead>
+                            <tr>
+                              <th>MHE type</th>
+                              <th>Trained on</th>
+                              <th>Training due</th>
+                              <th>Days</th>
+                              <th>Certificate</th>
+                              <th style={{ width: 220 }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {c._visibleAuths.map((a) => {
+                              const d = a.training_due ? daysUntil(a.training_due) : null;
+                              const hasCert = !!a.certificate_path;
+
+                              return (
+                                <tr key={a.id} className={!a.training_due || (d != null && d <= OUTSTANDING_DAYS) ? "wi-rowDueSoon" : ""}>
+                                  <td>{a.mhe_type}</td>
+                                  <td>{a.trained_on}</td>
+
+                                  <td>
+                                    <input
+                                      className="wi-input"
+                                      type="date"
+                                      value={a.training_due || ""}
+                                      onChange={(e) => {
+                                        const v = e.target.value;
+                                        setCurrentAuths((prev) => (prev || []).map((x) => (x.id === a.id ? { ...x, training_due: v } : x)));
+                                      }}
+                                      // IMPORTANT FIX: onBlur persists to base table with real id
+                                      onBlur={(e) => updateTrainingDue(a.id, e.target.value)}
+                                      disabled={loading}
+                                    />
+                                  </td>
+
+                                  <td>{d == null ? "—" : d}</td>
+                                  <td>{hasCert ? "Yes" : "No"}</td>
+
+                                  <td>
+                                    <div className="wi-actionsRow">
+                                      <Button variant="primary" onClick={() => beginUpload(a)} disabled={loading}>
+                                        {hasCert ? "Replace cert" : "Upload cert"}
+                                      </Button>
+                                      <Button variant="primary" onClick={() => openRetrain(a)} disabled={loading}>
+                                        Retrain
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {hoverTip.open && hoverTip.colleagueId && (
+              <div className="wi-floatTip" style={{ left: hoverTip.x, top: hoverTip.y, width: 520 }}>
+                {/* IMPORTANT FIX: show colleague name in title */}
+                <div className="wi-floatTip__title">
+                  {colleagueNameById.get(hoverTip.colleagueId) || "Colleague"} – Training record (all)
+                </div>
+
+                {hoverTip.loading ? (
+                  <div className="wi-muted">Loading…</div>
+                ) : hoverTip.rows.length === 0 ? (
+                  <div className="wi-muted">No training records found.</div>
+                ) : (
+                  <div className="wi-floatTip__list" style={{ maxHeight: 300, overflow: "auto", paddingRight: 6 }}>
+                    {hoverTip.rows.map((r) => {
+                      const d = r.training_due ? daysUntil(r.training_due) : null;
+                      return (
+                        <div key={r.id} className="wi-floatTip__row">
+                          <div className="t">
+                            {r.mhe_type}{" "}
+                            <span style={{ fontWeight: 800, color: "#6b7280", marginLeft: 8 }}>
+                              ({r.status || "—"})
+                            </span>
+                          </div>
+                          <div className="d">
+                            Trained: <strong>{r.trained_on || "—"}</strong> • Due: <strong>{r.training_due || "—"}</strong> •{" "}
+                            {d == null ? "—" : `${d}d`} • Cert: <strong>{r.certificate_path ? "Yes" : "No"}</strong>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </Card>
         )}
 
-        {/* ADD MODAL */}
-        <PageModal open={addModal.open} title="Add training record" onClose={closeAdd}>
-          <div className="wi-grid2">
-            <div className="wi-control">
-              <label className="wi-label">Colleague</label>
-              <select
-                className="wi-field"
-                value={addModal.colleague_id}
-                onChange={(e) => setAddModal((p) => ({ ...p, colleague_id: e.target.value }))}
-                disabled={loading}
-              >
-                <option value="">Select colleague…</option>
-                {colleagueOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="wi-control">
-              <label className="wi-label">MHE type</label>
-              <select
-                className="wi-field"
-                value={addModal.mhe_type_id}
-                onChange={(e) => setAddModal((p) => ({ ...p, mhe_type_id: e.target.value }))}
-                disabled={loading}
-              >
-                <option value="">Select type…</option>
-                {mheTypeOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="wi-control">
-              <label className="wi-label">Trained on</label>
-              <input
-                className="wi-field"
-                type="date"
-                value={addModal.trained_on}
-                onChange={(e) => setAddModal((p) => ({ ...p, trained_on: e.target.value }))}
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control">
-              <label className="wi-label">Next training due</label>
-              <input
-                className="wi-field"
-                type="date"
-                value={addModal.expires_on}
-                onChange={(e) => setAddModal((p) => ({ ...p, expires_on: e.target.value }))}
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control wi-control--full">
-              <label className="wi-label">Notes</label>
-              <input
-                className="wi-field"
-                value={addModal.notes}
-                onChange={(e) => setAddModal((p) => ({ ...p, notes: e.target.value }))}
-                placeholder="Optional…"
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control wi-control--full">
-              <label className="wi-label">Certificate</label>
-              <div className="wi-fileRow">
-                <Button variant="secondary" onClick={() => addFileRef.current?.click()} disabled={loading || !siteId}>
-                  Upload certificate
-                </Button>
-                <span className="wi-muted">{addModal.fileName || (addModal.certificatePath ? "Uploaded" : "None")}</span>
+        {tab === "history" && (
+          <Card title="Audit history" subtitle="Full training record per colleague (includes revoked/expired).">
+            <div className="wi-formGrid">
+              <div className="wi-field wi-span2">
+                <label className="wi-label">Colleague</label>
+                <select className="wi-input" value={historyColleagueId} onChange={(e) => setHistoryColleagueId(e.target.value)} disabled={loading}>
+                  <option value="">Select colleague…</option>
+                  {siteColleagues.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.last_name}, {c.first_name} ({c.employment_type})
+                    </option>
+                  ))}
+                </select>
               </div>
-              <input ref={addFileRef} type="file" style={{ display: "none" }} onChange={onAddFileChange} />
-            </div>
-          </div>
 
-          <div className="wi-modalActions">
-            <Button variant="secondary" onClick={closeAdd} disabled={loading}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={submitAdd} disabled={loading}>
-              Save
-            </Button>
-          </div>
-        </PageModal>
-
-        {/* RETRAIN MODAL */}
-        <PageModal open={retrainModal.open} title="Record retraining" onClose={closeRetrain}>
-          <div className="wi-grid2">
-            <div className="wi-control">
-              <label className="wi-label">Trained on</label>
-              <input
-                className="wi-field"
-                type="date"
-                value={retrainModal.trained_on}
-                onChange={(e) => setRetrainModal((p) => ({ ...p, trained_on: e.target.value }))}
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control">
-              <label className="wi-label">Next training due</label>
-              <input
-                className="wi-field"
-                type="date"
-                value={retrainModal.expires_on}
-                onChange={(e) => setRetrainModal((p) => ({ ...p, expires_on: e.target.value }))}
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control wi-control--full">
-              <label className="wi-label">Notes</label>
-              <input
-                className="wi-field"
-                value={retrainModal.notes}
-                onChange={(e) => setRetrainModal((p) => ({ ...p, notes: e.target.value }))}
-                placeholder="Optional…"
-                disabled={loading}
-              />
-            </div>
-
-            <div className="wi-control wi-control--full">
-              <label className="wi-label">Certificate</label>
-              <div className="wi-fileRow">
-                <Button variant="secondary" onClick={() => retrainFileRef.current?.click()} disabled={loading || !siteId}>
-                  Upload certificate
-                </Button>
-                <span className="wi-muted">{retrainModal.fileName || (retrainModal.certificatePath ? "Uploaded" : "None")}</span>
+              <div className="wi-field">
+                <label className="wi-label">Filter MHE type</label>
+                <select className="wi-input" value={historyMheTypeId} onChange={(e) => setHistoryMheTypeId(e.target.value)} disabled={loading}>
+                  <option value="ALL">All types</option>
+                  {mheTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.type_name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <input ref={retrainFileRef} type="file" style={{ display: "none" }} onChange={onRetrainFileChange} />
+
+              <div className="wi-field">
+                <label className="wi-label">Actions</label>
+                <Button variant="primary" onClick={refreshHistory} disabled={loading || !historyColleagueId}>
+                  Refresh history
+                </Button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              {!historyColleagueId ? (
+                <div className="wi-muted">Select a colleague to view their full training record.</div>
+              ) : historyRows.length === 0 ? (
+                <div className="wi-muted">No training records found.</div>
+              ) : (
+                <div className="wi-tableWrap wi-tableWrap--tall">
+                  <table className="wi-table">
+                    <thead>
+                      <tr>
+                        <th>MHE type</th>
+                        <th>Trained on</th>
+                        <th>Training due</th>
+                        <th>Days</th>
+                        <th>Status</th>
+                        <th>Certificate</th>
+                        <th>Signed off</th>
+                        <th>Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyRows.map((r) => {
+                        const typeName = mheTypeNameById.get(r.mhe_type_id) || r.mhe_type_id;
+                        const dte = r.training_due ? daysUntil(r.training_due) : null;
+                        return (
+                          <tr key={r.id} className={r.status === "ACTIVE" ? "" : "wi-rowHistory"}>
+                            <td>{typeName}</td>
+                            <td>{r.trained_on}</td>
+                            <td>{r.training_due || "—"}</td>
+                            <td>{dte ?? "—"}</td>
+                            <td>{r.status || "—"}</td>
+                            <td>{r.certificate_path ? "Yes" : "No"}</td>
+                            <td>{r.signed_off_at ? String(r.signed_off_at).replace("T", " ").slice(0, 19) : "—"}</td>
+                            <td className="wi-cellNotes">{r.notes || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {/* Add Training Modal */}
+        {addModal.open && (
+          <div className="wi-modalOverlay" role="dialog" aria-modal="true">
+            <div className="wi-modal">
+              <div className="wi-modalHeader">
+                <div className="wi-modalTitle">Add training record</div>
+                <button className="wi-modalClose" onClick={closeAddTraining} type="button">
+                  ×
+                </button>
+              </div>
+
+              <div className="wi-modalBody">
+                <div className="wi-formGrid">
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Colleague</label>
+                    <select
+                      className="wi-input"
+                      value={addModal.colleagueId}
+                      onChange={(e) => setAddModal((m) => ({ ...m, colleagueId: e.target.value }))}
+                      disabled={loading}
+                    >
+                      <option value="">Select colleague…</option>
+                      {siteColleagues.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.last_name}, {c.first_name} ({c.employment_type})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">MHE type</label>
+                    <select
+                      className="wi-input"
+                      value={addModal.mheTypeId}
+                      onChange={(e) => setAddModal((m) => ({ ...m, mheTypeId: e.target.value }))}
+                      disabled={loading}
+                    >
+                      <option value="">Select MHE type…</option>
+                      {mheTypes.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.type_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Trained on</label>
+                    <input
+                      type="date"
+                      className="wi-input"
+                      value={addModal.trained_on}
+                      onChange={(e) => setAddModal((m) => ({ ...m, trained_on: e.target.value }))}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Training due (manual)</label>
+                    <input
+                      type="date"
+                      className="wi-input"
+                      value={addModal.training_due}
+                      onChange={(e) => setAddModal((m) => ({ ...m, training_due: e.target.value }))}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Certificate (optional)</label>
+                    <div className="wi-uploadRow">
+                      <Button variant="primary" onClick={() => addFileRef.current?.click()} disabled={loading}>
+                        Upload file
+                      </Button>
+                      <div className="wi-helper">
+                        {addModal.fileName ? `Selected: ${addModal.fileName}` : "PDF/JPG/PNG"}
+                        {addModal.certificatePath ? " (uploaded)" : ""}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Notes (optional)</label>
+                    <input className="wi-input" value={addModal.notes} onChange={(e) => setAddModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="wi-modalFooter">
+                <Button variant="primary" onClick={submitAddTraining} disabled={loading}>
+                  {loading ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="primary" onClick={closeAddTraining} disabled={loading}>
+                  Cancel
+                </Button>
+              </div>
             </div>
           </div>
+        )}
 
-          <div className="wi-modalActions">
-            <Button variant="secondary" onClick={closeRetrain} disabled={loading}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={submitRetrain} disabled={loading}>
-              Save retraining
-            </Button>
+        {/* Retrain Modal */}
+        {retrainModal.open && retrainModal.auth && (
+          <div className="wi-modalOverlay" role="dialog" aria-modal="true">
+            <div className="wi-modal">
+              <div className="wi-modalHeader">
+                <div className="wi-modalTitle">Record retraining (history preserved)</div>
+                <button className="wi-modalClose" onClick={closeRetrain} type="button">
+                  ×
+                </button>
+              </div>
+
+              <div className="wi-modalBody">
+                <div className="wi-muted" style={{ marginBottom: 10 }}>
+                  This will revoke the current record and create a new ACTIVE authorisation.
+                </div>
+
+                <div className="wi-formGrid">
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">MHE type</label>
+                    <input className="wi-input" value={retrainModal.auth.mhe_type} disabled />
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Trained on</label>
+                    <input
+                      type="date"
+                      className="wi-input"
+                      value={retrainModal.trained_on}
+                      onChange={(e) => setRetrainModal((m) => ({ ...m, trained_on: e.target.value }))}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Training due (manual)</label>
+                    <input
+                      type="date"
+                      className="wi-input"
+                      value={retrainModal.training_due}
+                      onChange={(e) => setRetrainModal((m) => ({ ...m, training_due: e.target.value }))}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Certificate (optional)</label>
+                    <div className="wi-uploadRow">
+                      <Button variant="primary" onClick={() => retrainFileRef.current?.click()} disabled={loading}>
+                        Upload file
+                      </Button>
+                      <div className="wi-helper">
+                        {retrainModal.fileName ? `Selected: ${retrainModal.fileName}` : "PDF/JPG/PNG"}
+                        {retrainModal.certificatePath ? " (uploaded)" : ""}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="wi-field wi-span2">
+                    <label className="wi-label">Notes (optional)</label>
+                    <input className="wi-input" value={retrainModal.notes} onChange={(e) => setRetrainModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="wi-modalFooter">
+                <Button variant="primary" onClick={submitRetrain} disabled={loading}>
+                  {loading ? "Saving…" : "Save retraining"}
+                </Button>
+                <Button variant="primary" onClick={closeRetrain} disabled={loading}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
           </div>
-        </PageModal>
-
-        {/* INLINE UPLOAD INPUT */}
-        <input ref={inlineFileRef} type="file" style={{ display: "none" }} onChange={onInlineFileChange} />
+        )}
       </div>
     </AppLayout>
   );

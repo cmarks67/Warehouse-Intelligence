@@ -7,16 +7,6 @@ import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 import { supabase } from "../lib/supabaseClient";
 
-/**
- * Mirrors the behaviour from the original dashboard.html:
- * - account card with WI-XXXX account id
- * - users list scoped by business_owner_id
- * - admin actions: reset/promote/deactivate
- * - add user uses a transient client (persistSession:false) to avoid replacing admin session
- * - single_user vs business gating + upgrade card
- * Ref: dashboard.html :contentReference[oaicite:4]{index=4}
- */
-
 function fmtDate(iso) {
   if (!iso) return "";
   try {
@@ -28,7 +18,7 @@ function fmtDate(iso) {
 
 function shortAccountId(raw) {
   if (!raw) return "WI-UNKNOWN";
-  return "WI-" + raw.slice(0, 8).toUpperCase();
+  return "WI-" + String(raw).slice(0, 8).toUpperCase();
 }
 
 export function UsersPage() {
@@ -38,6 +28,8 @@ export function UsersPage() {
   const [profile, setProfile] = useState(null);
 
   const [users, setUsers] = useState([]);
+  const [userCount, setUserCount] = useState(0);
+
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
 
@@ -48,16 +40,12 @@ export function UsersPage() {
   const [pw2, setPw2] = useState("");
 
   const isAdmin = profile?.role === "admin";
-  const isBusiness = profile?.account_type === "business";
-  const businessOwnerId = useMemo(
-    () => profile?.business_owner_id || profile?.id,
-    [profile]
-  );
 
-  const accountIdDisplay = useMemo(
-    () => shortAccountId(profile?.business_owner_id || profile?.id),
-    [profile]
-  );
+  // Business should be derived from account membership, not the user row.
+  const isBusinessDerived = userCount > 1;
+
+  // Display account id consistently using account_id (this is your true tenant key).
+  const accountIdDisplay = useMemo(() => shortAccountId(profile?.account_id), [profile]);
 
   // ✅ navigation must go to /app/* routes
   const onSelectNav = (key) => {
@@ -67,17 +55,25 @@ export function UsersPage() {
     if (key === "scheduling-tool") navigate("/app/dashboard");
   };
 
-  async function loadUsers(p) {
-    const owner = p.business_owner_id || p.id;
+  async function loadUsersByAccount(accountId) {
+    if (!accountId) {
+      setUsers([]);
+      setUserCount(0);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("users")
       .select("*")
-      .eq("business_owner_id", owner)
+      .eq("account_id", accountId)
       .eq("is_active", true)
       .order("created_at", { ascending: true });
 
     if (error) throw error;
-    setUsers(data || []);
+
+    const list = data || [];
+    setUsers(list);
+    setUserCount(list.length);
   }
 
   async function init() {
@@ -99,24 +95,27 @@ export function UsersPage() {
       .single();
 
     if (pe || !p) {
-      // If profile is missing, mirror old behaviour: create one (admin + single_user)
-      // This matches the old dashboard's “create profile if missing” approach. :contentReference[oaicite:5]{index=5}
+      // If profile is missing, create a minimal profile.
+      // IMPORTANT: use auth user id as the initial account_id (tenant key).
       const fallback = {
         id: authUser.id,
         email: authUser.email,
         full_name: authUser.user_metadata?.full_name || authUser.email,
         role: "admin",
         account_type: "single_user",
+        account_id: authUser.id,
         business_owner_id: authUser.id,
         is_active: true,
       };
+
       const { error: ue } = await supabase.from("users").upsert(fallback);
       if (ue) {
         setMsg({ type: "error", text: "Unable to load/create profile: " + ue.message });
         return;
       }
+
       setProfile(fallback);
-      await loadUsers(fallback);
+      await loadUsersByAccount(fallback.account_id);
       return;
     }
 
@@ -128,7 +127,25 @@ export function UsersPage() {
     }
 
     setProfile(p);
-    await loadUsers(p);
+    await loadUsersByAccount(p.account_id);
+
+    // Optional self-heal: if the account has >1 users but the current row says single_user,
+    // update the current user row to business so the UI and data are aligned.
+    // (This does NOT change any other rows.)
+    // If you prefer to keep data changes manual, delete this block.
+    const { data: list } = await supabase
+      .from("users")
+      .select("id")
+      .eq("account_id", p.account_id)
+      .eq("is_active", true);
+
+    const count = (list || []).length;
+    setUserCount(count);
+
+    if (count > 1 && p.account_type !== "business") {
+      await supabase.from("users").update({ account_type: "business" }).eq("id", p.id);
+      setProfile({ ...p, account_type: "business" });
+    }
   }
 
   useEffect(() => {
@@ -143,7 +160,6 @@ export function UsersPage() {
     setMsg({ type: "", text: "" });
     setBusy(true);
     try {
-      // Match old dashboard: direct resetPasswordForEmail with redirectTo :contentReference[oaicite:6]{index=6}
       const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
         redirectTo: "https://warehouseintelligence.co.uk/password-reset.html",
       });
@@ -170,7 +186,7 @@ export function UsersPage() {
       if (error) throw error;
 
       setMsg({ type: "success", text: "User promoted." });
-      await loadUsers(profile);
+      await loadUsersByAccount(profile.account_id);
     } catch (e) {
       console.error(e);
       setMsg({ type: "error", text: "Promote failed: " + (e?.message || e) });
@@ -188,7 +204,7 @@ export function UsersPage() {
       if (error) throw error;
 
       setMsg({ type: "success", text: "User deactivated." });
-      await loadUsers(profile);
+      await loadUsersByAccount(profile.account_id);
     } catch (e) {
       console.error(e);
       setMsg({ type: "error", text: "Deactivate failed: " + (e?.message || e) });
@@ -201,7 +217,7 @@ export function UsersPage() {
     e.preventDefault();
     setMsg({ type: "", text: "" });
 
-    if (!profile || profile.account_type !== "business" || profile.role !== "admin") {
+    if (!profile || !isBusinessDerived || profile.role !== "admin") {
       setMsg({ type: "error", text: "You are not allowed to add users." });
       return;
     }
@@ -212,7 +228,6 @@ export function UsersPage() {
 
     setBusy(true);
     try {
-      // Match old dashboard: transient client signUp (persistSession:false) :contentReference[oaicite:7]{index=7}
       const url = import.meta.env.VITE_SUPABASE_URL;
       const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -242,7 +257,8 @@ export function UsersPage() {
         full_name: fullName.trim(),
         role: "standard",
         account_type: "business",
-        business_owner_id: businessOwnerId,
+        account_id: profile.account_id,
+        business_owner_id: profile.business_owner_id || profile.id,
         is_active: true,
       });
       if (upsertErr) throw upsertErr;
@@ -253,7 +269,7 @@ export function UsersPage() {
       setPw1("");
       setPw2("");
 
-      await loadUsers(profile);
+      await loadUsersByAccount(profile.account_id);
     } catch (e) {
       console.error(e);
       setMsg({ type: "error", text: e?.message || String(e) });
@@ -264,15 +280,15 @@ export function UsersPage() {
 
   return (
     <AppLayout headerEmail={headerEmail} activeNav="users" onSelectNav={onSelectNav}>
-      {/* Account card (parity with old dashboard) :contentReference[oaicite:8]{index=8} */}
       <Card title="Account" subtitle="">
         <div className="wi-muted">{profile?.full_name || ""}</div>
+
         <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <span className={`wi-badge ${profile?.role === "admin" ? "admin" : "standard"}`}>
-            {profile?.role === "admin" ? "Admin" : "Standard"}
+          <span className={`wi-badge ${isAdmin ? "admin" : "standard"}`}>
+            {isAdmin ? "Admin" : "Standard"}
           </span>
-          <span className={`wi-badge ${profile?.account_type || ""}`}>
-            {profile?.account_type === "business" ? "Business" : "Single user"}
+          <span className={`wi-badge ${isBusinessDerived ? "business" : "single_user"}`}>
+            {isBusinessDerived ? "Business" : "Single user"}
           </span>
         </div>
 
@@ -287,7 +303,7 @@ export function UsersPage() {
       <Card
         title="Users"
         subtitle={
-          profile?.account_type === "single_user"
+          !isBusinessDerived
             ? "This is a single-user account."
             : isAdmin
               ? "Manage users under this business account."
@@ -300,8 +316,7 @@ export function UsersPage() {
           </div>
         )}
 
-        {/* Single-user gating + upgrade card (parity with old dashboard) :contentReference[oaicite:9]{index=9} */}
-        {profile?.account_type === "single_user" && (
+        {!isBusinessDerived && (
           <>
             <p className="wi-muted">
               This account is configured as <strong>Single user</strong>. Additional users cannot be added.
@@ -319,7 +334,6 @@ export function UsersPage() {
           </>
         )}
 
-        {/* Users table (parity with old dashboard) :contentReference[oaicite:10]{index=10} */}
         <div style={{ marginTop: 12, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
@@ -334,14 +348,18 @@ export function UsersPage() {
             <tbody>
               {users.map((u) => {
                 const isSelf = u.id === profile?.id;
-                const canManage = isAdmin && !isSelf;
+                const canManage = isAdmin && !isSelf && isBusinessDerived;
 
                 return (
                   <tr key={u.id}>
                     <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>{u.email}</td>
-                    <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>{u.full_name || ""}</td>
+                    <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>
+                      {u.full_name || ""}
+                    </td>
                     <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>{u.role}</td>
-                    <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>{fmtDate(u.created_at)}</td>
+                    <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>
+                      {fmtDate(u.created_at)}
+                    </td>
                     <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--wi-border)" }}>
                       {canManage ? (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -376,8 +394,7 @@ export function UsersPage() {
           </table>
         </div>
 
-        {/* Add user form: only business + admin (parity with old dashboard) :contentReference[oaicite:11]{index=11} */}
-        {isBusiness && isAdmin && (
+        {isBusinessDerived && isAdmin && (
           <div style={{ marginTop: 18 }}>
             <h3 style={{ margin: "0 0 8px" }}>Add a standard user</h3>
             <form onSubmit={createUser} style={{ display: "grid", gap: 10, maxWidth: 520 }}>

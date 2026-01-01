@@ -9,7 +9,7 @@ function evaluateStrength(value) {
   if (/[A-Z]/.test(value)) score++;
   if (/[0-9]/.test(value)) score++;
   if (/[^A-Za-z0-9]/.test(value)) score++;
-  return score; // 0..4
+  return score;
 }
 
 function strengthUI(password) {
@@ -46,7 +46,7 @@ export function Login() {
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [accountType, setAccountType] = useState("business");
+  const [accountType, setAccountType] = useState("business"); // business | single_user
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -63,7 +63,7 @@ export function Login() {
     setMessage("");
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: signinEmail,
+      email: signinEmail.trim(),
       password: signinPassword,
     });
 
@@ -89,13 +89,17 @@ export function Login() {
       return;
     }
 
+    // IMPORTANT:
+    // - account_type must match your DB constraint: 'business' | 'single_user'
+    // - The DB trigger/server-side logic should create:
+    //   public.accounts (plan) + public.users (role/account_type/account_id/business_owner_id)
     const { error } = await supabase.auth.signUp({
-      email: createEmail,
+      email: createEmail.trim(),
       password: createPassword,
       options: {
         data: {
-          full_name: fullName,
-          account_type: accountType,
+          full_name: fullName.trim(),
+          account_type: accountType, // 'business' or 'single_user'
         },
       },
     });
@@ -123,9 +127,10 @@ export function Login() {
       return;
     }
 
-    // NOTE: ensure this URL is present in Supabase Auth Redirect URLs (Dashboard → Authentication)
-    const { error } = await supabase.auth.resetPasswordForEmail(signinEmail, {
-      redirectTo: `${window.location.origin}/password-reset`,
+    // Align redirect behaviour with the rest of the app
+    // (Make sure this URL is in Supabase Auth Redirect URLs.)
+    const { error } = await supabase.auth.resetPasswordForEmail(signinEmail.trim(), {
+      redirectTo: "https://warehouseintelligence.co.uk/password-reset.html",
     });
 
     setBusy(false);
@@ -176,9 +181,7 @@ export function Login() {
         </div>
 
         {(error || message) && (
-          <div className={`auth-alert ${error ? "error" : "ok"}`}>
-            {error || message}
-          </div>
+          <div className={`auth-alert ${error ? "error" : "ok"}`}>{error || message}</div>
         )}
 
         {/* SIGN IN */}
@@ -276,10 +279,7 @@ export function Login() {
 
                 <div className="strength-wrapper">
                   <div className="strength-meter">
-                    <div
-                      className={`strength-bar ${strength.tone}`}
-                      style={{ width: strength.width }}
-                    />
+                    <div className={`strength-bar ${strength.tone}`} style={{ width: strength.width }} />
                   </div>
                   <div className="strength-text">{strength.label}</div>
                 </div>
@@ -312,7 +312,7 @@ export function Login() {
                   onChange={(e) => setAccountType(e.target.value)}
                 >
                   <option value="business">Business (multiple users)</option>
-                  <option value="single">Single user</option>
+                  <option value="single_user">Single user</option>
                 </select>
               </div>
             </div>
@@ -322,9 +322,7 @@ export function Login() {
             </button>
           </form>
 
-          <div className="footnote">
-            The first user for an account is always created as an Administrator.
-          </div>
+          <div className="footnote">The first user for an account is always created as an Administrator.</div>
         </section>
       </div>
     </div>

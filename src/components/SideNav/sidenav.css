@@ -6,30 +6,91 @@
   margin-bottom: 6px;
 }
 
-.wi-nav__item {
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  margin-bottom: 4px;
-  font-size: 0.9rem;
-}
-
-.wi-nav__item:hover {
-  background: #f3f4f6;
-}
-
-.wi-nav__item.active {
-  background: color-mix(in srgb, var(--wi-primary) 12%, white);
-  color: var(--wi-primary);
-  font-weight: 600;
-}
-
 .wi-nav__divider {
   height: 1px;
   background: var(--wi-border);
   margin: 12px 0;
 }
 
+/* Root: DO NOT force fixed widths here (AppLayout controls sidebar width) */
+.wi-navRoot {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Still useful for internal styling differences when collapsed */
+.wi-navRoot--collapsed {
+  width: 100%;
+}
+
+/* Scroll behaviour */
+.wi-nav__scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  padding-right: 4px;
+}
+
+/* Top bar */
+.wi-nav__topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px 10px;
+}
+
+.wi-nav__brand {
+  font-weight: 800;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wi-nav__brandAccent {
+  color: var(--wi-primary);
+}
+
+.wi-nav__controls {
+  display: flex;
+  gap: 6px;
+}
+
+.wi-nav__iconBtn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--wi-border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--wi-text-muted);
+}
+
+.wi-nav__iconBtn:hover {
+  background: #f3f4f6;
+  color: var(--wi-text-main);
+}
+
+.wi-nav__iconBtn.is-active {
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+  border-color: rgba(37, 99, 235, 0.45);
+  color: var(--wi-primary);
+}
+
+.wi-nav__iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Dropdown headers */
 .wi-nav__dropdownHeader {
   display: flex;
   justify-content: space-between;
@@ -48,14 +109,16 @@
   color: var(--wi-text-muted);
 }
 
+/* Links */
 .wi-nav__link {
   display: block;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--wi-text-main);
   text-decoration: none;
   font-size: 0.9rem;
   cursor: pointer;
+  margin-bottom: 4px;
 }
 
 .wi-nav__link:hover {
@@ -68,73 +131,8 @@
   font-weight: 600;
 }
 
-.hidden {
-  display: none;
-}
-/* Sidebar root: fixed width + consistent sizing */
-.wi-navRoot {
-  width: 260px;            /* expanded width */
-  min-width: 260px;
-  max-width: 260px;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.wi-navRoot--collapsed {
-  width: 64px;             /* collapsed width */
-  min-width: 64px;
-  max-width: 64px;
-}
-
-/* Prevent content causing width jumps */
-.wi-nav__scroll {
-  overflow-y: auto;
-  overflow-x: hidden;
-  flex: 1;
-  padding-right: 4px; /* keeps scrollbar from shifting content */
-}
-
-/* Top bar controls */
-.wi-nav__topBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 10px 8px 10px;
-}
-
-.wi-nav__brand {
-  font-weight: 800;
-  font-size: 0.95rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wi-nav__controls {
-  display: flex;
-  gap: 8px;
-}
-
-.wi-nav__ctrlBtn {
-  border: 1px solid var(--border, #e5e7eb);
-  background: #fff;
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.wi-nav__ctrlBtn.is-active {
-  outline: 2px solid rgba(37, 99, 235, 0.35);
-  border-color: rgba(37, 99, 235, 0.55);
-}
-
-/* Collapsed mode: hide labels but keep clickable area */
-.wi-nav__item.is-collapsed,
-.wi-nav__link.is-collapsed,
+/* Collapsed mode */
 .wi-nav__dropdownHeader.is-collapsed {
-  display: flex;
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
@@ -144,9 +142,42 @@
   display: none;
 }
 
-/* Keep labels from wrapping and changing height */
 .wi-nav__label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wi-nav__link.is-collapsed {
+  display: flex;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.wi-nav__link--icon {
+  padding: 8px 0;
+}
+
+.wi-nav__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.wi-nav__link.active.wi-nav__link--icon .wi-nav__icon {
+  background: color-mix(in srgb, var(--wi-primary) 12%, white);
+  color: var(--wi-primary);
+  font-weight: 600;
+}
+
+.wi-nav__link.wi-nav__link--icon:hover .wi-nav__icon {
+  background: #f3f4f6;
+}
+
+.hidden {
+  display: none;
 }

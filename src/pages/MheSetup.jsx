@@ -139,12 +139,7 @@ export default function MheSetup() {
   const resolveAccountId = useCallback(async (userId) => {
     // Try users table
     {
-      const { data, error } = await supabase
-        .from("users")
-        .select("account_id")
-        .eq("id", userId)
-        .maybeSingle();
-
+      const { data, error } = await supabase.from("users").select("account_id").eq("id", userId).maybeSingle();
       if (!error && data?.account_id) return data.account_id;
     }
 
@@ -194,6 +189,10 @@ export default function MheSetup() {
     return user;
   }, [navigate, accountId, resolveAccountId]);
 
+  /**
+   * FIX: do not hard-fail when company_users has no rows for this login.
+   * Instead, fallback to all companies in the tenant (like Colleagues fix).
+   */
   const loadCompaniesSitesAndMemberships = useCallback(async () => {
     if (!accountId) return;
 
@@ -233,25 +232,38 @@ export default function MheSetup() {
     if (cuError) throw cuError;
 
     const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
-    if (memberCompanyIds.size === 0) {
-      setAllowedCompanies([]);
-      setCompanyId("");
-      setAssetSite("");
-      throw new Error("No companies assigned to this user in company_users for this account.");
-    }
 
-    const allowed = companiesList.filter((co) => memberCompanyIds.has(co.id));
-    if (!allowed.length) {
-      setAllowedCompanies([]);
-      setCompanyId("");
-      setAssetSite("");
-      throw new Error("Your company memberships do not match any companies in this tenant.");
+    // --- FIX START ---
+    // If this login has no company_users rows, do NOT break the page.
+    // Fall back to all tenant companies and show a warning.
+    let allowed = [];
+    if (memberCompanyIds.size === 0) {
+      allowed = companiesList;
+
+      setStatus({
+        text:
+          "No companies assigned to this user in company_users for this account. " +
+          "Falling back to all companies in this account (add company_users rows to enforce memberships).",
+        isError: true, // keep red bar as you already use it for prominent notices
+      });
+    } else {
+      allowed = companiesList.filter((co) => memberCompanyIds.has(co.id));
+      if (!allowed.length) {
+        allowed = companiesList;
+        setStatus({
+          text:
+            "Your company memberships do not match any companies in this tenant. " +
+            "Falling back to all companies in this account.",
+          isError: true,
+        });
+      }
     }
 
     setAllowedCompanies(allowed);
 
     // Keep current company if still valid, else default to first allowed
-    setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
+    setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : (allowed[0]?.id || "")));
+    // --- FIX END ---
   }, [accountId]);
 
   const loadTypes = useCallback(async () => {
@@ -467,11 +479,7 @@ export default function MheSetup() {
         if (error) throw error;
         setStatus({ text: "Asset added.", isError: false });
       } else {
-        const { error } = await supabase
-          .from("mhe_assets")
-          .update(payload)
-          .eq("id", editingAssetId)
-          .eq("account_id", accountId);
+        const { error } = await supabase.from("mhe_assets").update(payload).eq("id", editingAssetId).eq("account_id", accountId);
         if (error) throw error;
 
         setStatus({ text: "Asset updated.", isError: false });
@@ -511,17 +519,11 @@ export default function MheSetup() {
         if (!user) return;
         if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
 
-        const { data, error } = await supabase
-          .from("mhe_assets")
-          .select("*")
-          .eq("id", id)
-          .eq("account_id", accountId)
-          .single();
+        const { data, error } = await supabase.from("mhe_assets").select("*").eq("id", id).eq("account_id", accountId).single();
         if (error) throw error;
 
         setEditingAssetId(data.id);
 
-        // ensure company selection matches the asset's site
         const site = sites.find((s) => s.id === data.site_id);
         if (site?.company_id) setCompanyId(site.company_id);
 
@@ -572,14 +574,7 @@ export default function MheSetup() {
 
   useEffect(() => {
     (async () => {
-      const user = await requireSession();
-      if (!user) return;
-
-      try {
-        setStatus({ text: "Loading…", isError: false });
-      } catch (e) {
-        setStatus({ text: e?.message || String(e), isError: true });
-      }
+      await requireSession();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -590,11 +585,14 @@ export default function MheSetup() {
       try {
         if (!accountId) return;
 
+        setStatus({ text: "Loading…", isError: false });
+
         await loadCompaniesSitesAndMemberships();
         await loadTypes();
         await loadAssets();
 
-        setStatus({ text: "Ready.", isError: false });
+        // Only set "Ready" if we didn't already set a warning/error message from fallback
+        setStatus((prev) => (prev?.isError ? prev : { text: "Ready.", isError: false }));
       } catch (e) {
         setStatus({ text: e?.message || String(e), isError: true });
       }
@@ -641,7 +639,7 @@ export default function MheSetup() {
                   await loadCompaniesSitesAndMemberships();
                   await loadTypes();
                   await loadAssets();
-                  setStatus({ text: "Ready.", isError: false });
+                  setStatus((prev) => (prev?.isError ? prev : { text: "Ready.", isError: false }));
                 } catch (e) {
                   setStatus({ text: e?.message || String(e), isError: true });
                 }

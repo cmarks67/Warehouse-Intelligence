@@ -1,10 +1,14 @@
 // /src/components/AppLayout/AppLayout.jsx
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 
 import "./AppLayout.css";
+
+// IMPORTANT: AppLayout is in /components/AppLayout,
+// SideNav is in /components/SideNav
 import { SideNav } from "../SideNav/SideNav";
+import { TopBar } from "../TopBar/TopBar";
 
 export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
   const navigate = useNavigate();
@@ -15,11 +19,16 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
     settings: true,
   });
 
-  const onToggleSection = (key) => {
+  const onToggleSection = useCallback((key) => {
     setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  }, []);
 
-  // Create a supabase client (preferred: centralise this in /src/lib/supabaseClient.js later)
+  // This is what allows the content to shift left when collapsed
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const handleNavCollapsedChange = useCallback((isCollapsed) => {
+    setNavCollapsed(!!isCollapsed);
+  }, []);
+
   const supabase = useMemo(() => {
     const url = import.meta.env.VITE_SUPABASE_URL;
     const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -29,47 +38,28 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
 
   const onSignOut = async () => {
     try {
-      if (supabase) {
-        await supabase.auth.signOut();
-      }
+      if (supabase) await supabase.auth.signOut();
     } finally {
-      // Always push user back to login after sign out
       navigate("/login", { replace: true });
     }
   };
 
   return (
     <div className="wi-shell">
-      {/* Header */}
-      <header className="wi-header">
-        <div className="wi-header-inner">
-          <div className="wi-brand">
-            Warehouse <span>Intelligence</span>
-          </div>
+      <TopBar email={headerEmail} onSignOut={onSignOut} />
 
-          <div className="wi-user">
-            <span className="wi-user-email">{headerEmail}</span>
-            <button className="wi-btn wi-btn-outline" onClick={onSignOut} type="button">
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main */}
       <main className="wi-main">
-        <div className="wi-layout">
-          {/* Sidebar */}
-          <aside className="wi-sidebar">
+        <div className={`wi-layout ${navCollapsed ? "wi-layout--nav-collapsed" : ""}`}>
+          <aside className={`wi-sidebar ${navCollapsed ? "wi-sidebar--collapsed" : ""}`}>
             <SideNav
               active={activeNav}
               onSelect={onSelectNav}
               sectionsOpen={sectionsOpen}
               onToggleSection={onToggleSection}
+              onCollapsedChange={handleNavCollapsedChange}
             />
           </aside>
 
-          {/* Content */}
           <section className="wi-content">{children}</section>
         </div>
       </main>

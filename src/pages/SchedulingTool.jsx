@@ -219,15 +219,37 @@ export default function SchedulingTool() {
         if (cuErr) throw cuErr;
 
         const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
-        if (memberCompanyIds.size === 0) throw new Error("No companies assigned to this user in company_users for this account.");
 
-        const allowed = (compRows || []).filter((c) => memberCompanyIds.has(c.id));
-        if (!allowed.length) throw new Error("Your company memberships do not match any companies in this tenant.");
+        // FIX: Do NOT hard-fail if this login has no company_users rows.
+        // Fall back to all tenant companies (same behaviour as Colleagues/MHE fix).
+        let allowed = [];
+        if (memberCompanyIds.size === 0) {
+          allowed = compRows || [];
+          setStatus({
+            text:
+              "No companies assigned to this user in company_users for this account. " +
+              "Falling back to all companies in this account (add company_users rows to enforce memberships).",
+            isError: true,
+          });
+        } else {
+          allowed = (compRows || []).filter((c) => memberCompanyIds.has(c.id));
+          if (!allowed.length) {
+            allowed = compRows || [];
+            setStatus({
+              text:
+                "Your company memberships do not match any companies in this tenant. " +
+                "Falling back to all companies in this account.",
+              isError: true,
+            });
+          } else {
+            setStatus({ text: "Ready.", isError: false });
+          }
+        }
 
         setAllowedCompanies(allowed);
 
         // Keep selection if still valid, else default to first allowed
-        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : allowed[0].id));
+        setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : (allowed[0]?.id || "")));
       } catch (e) {
         setStatus({ text: e?.message || "Failed to load companies.", isError: true });
       }
