@@ -1,14 +1,14 @@
 // /src/components/AppLayout/AppLayout.jsx
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
 
 import "./AppLayout.css";
 
-// IMPORTANT: AppLayout is in /components/AppLayout,
-// SideNav is in /components/SideNav
 import { SideNav } from "../SideNav/SideNav";
 import { TopBar } from "../TopBar/TopBar";
+
+// IMPORTANT: use the SAME singleton client used by DashboardPage.jsx
+import supabase from "../../lib/supabaseClient";
 
 export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
   const navigate = useNavigate();
@@ -29,16 +29,89 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
     setNavCollapsed(!!isCollapsed);
   }, []);
 
-  const supabase = useMemo(() => {
-    const url = import.meta.env.VITE_SUPABASE_URL;
-    const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!url || !key) return null;
-    return createClient(url, key);
-  }, []);
+  // Header context
+  const [resolvedEmail, setResolvedEmail] = useState(headerEmail || "");
+  const [accountId, setAccountId] = useState("");
+
+  // Keep resolvedEmail in sync if pages pass it
+  useEffect(() => {
+    if (headerEmail) setResolvedEmail(headerEmail);
+  }, [headerEmail]);
+
+  const loadHeaderContext = useCallback(async () => {
+    // Use session so it works reliably on refresh (same as DashboardPage.jsx)
+    const { data: sess, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr) throw sessErr;
+
+    const u = sess?.session?.user || null;
+
+    if (!u) {
+      setAccountId("");
+      if (!headerEmail) setResolvedEmail("");
+      return;
+    }
+
+    if (!headerEmail) setResolvedEmail(u.email || "");
+
+    const { data: urow, error: uerr } = await supabase
+      .from("users")
+      .select("account_id")
+      .eq("id", u.id)
+      .single();
+
+    if (uerr) throw uerr;
+
+    setAccountId(urow?.account_id || "");
+  }, [headerEmail]);
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        await loadHeaderContext();
+      } catch {
+        if (!alive) return;
+        setAccountId("");
+      }
+    })();
+
+    // Keep header synced if auth changes
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!alive) return;
+
+      const u = session?.user || null;
+
+      if (!u) {
+        setAccountId("");
+        if (!headerEmail) setResolvedEmail("");
+        return;
+      }
+
+      if (!headerEmail) setResolvedEmail(u.email || "");
+
+      try {
+        const { data: urow, error: uerr } = await supabase
+          .from("users")
+          .select("account_id")
+          .eq("id", u.id)
+          .single();
+
+        if (!uerr) setAccountId(urow?.account_id || "");
+      } catch {
+        // ignore
+      }
+    });
+
+    return () => {
+      alive = false;
+      sub?.subscription?.unsubscribe?.();
+    };
+  }, [loadHeaderContext, headerEmail]);
 
   const onSignOut = async () => {
     try {
-      if (supabase) await supabase.auth.signOut();
+      await supabase.auth.signOut();
     } finally {
       navigate("/login", { replace: true });
     }
@@ -46,7 +119,7 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
 
   return (
     <div className="wi-shell">
-      <TopBar email={headerEmail} onSignOut={onSignOut} />
+      <TopBar email={resolvedEmail} accountId={accountId} onSignOut={onSignOut} />
 
       <main className="wi-main">
         <div className={`wi-layout ${navCollapsed ? "wi-layout--nav-collapsed" : ""}`}>

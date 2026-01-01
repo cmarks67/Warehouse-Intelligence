@@ -45,3 +45,43 @@
 .wi-signout:hover {
   background: #f9fafb;
 }
+
+/* --- NEW: stack email + account id --- */
+.wi-userinfo__details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+/* --- NEW: account id line --- */
+.wi-userinfo__account {
+  font-size: 0.75rem;
+  color: var(--wi-text-muted);
+  cursor: help;
+  position: relative;
+}
+
+/* --- NEW: tooltip --- */
+.wi-userinfo__account::after {
+  content: attr(data-full-id);
+  position: absolute;
+  bottom: -34px;
+  right: 0;
+  background: #111827;
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 1000;
+}
+
+.wi-userinfo__account:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}

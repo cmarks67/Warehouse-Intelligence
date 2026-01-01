@@ -1,6 +1,9 @@
 import "./topbar.css";
 
-export function TopBar({ email, onSignOut }) {
+export function TopBar({ email, accountId, onSignOut }) {
+  const full = accountId ? String(accountId) : "";
+  const short = full ? full.slice(-8) : "—";
+
   return (
     <header className="wi-header">
       <div className="wi-header__inner">
@@ -9,7 +12,18 @@ export function TopBar({ email, onSignOut }) {
         </div>
 
         <div className="wi-userinfo">
-          <span className="wi-userinfo__email">{email || ""}</span>
+          <div className="wi-userinfo__details">
+            <span className="wi-userinfo__email">{email || ""}</span>
+
+            <span
+              className={`wi-userinfo__account ${full ? "" : "wi-userinfo__account--empty"}`}
+              data-full-id={full || ""}
+              title={full || ""}  /* extra fallback tooltip */
+            >
+              Account: {short}
+            </span>
+          </div>
+
           <button className="wi-signout" type="button" onClick={onSignOut}>
             Sign out
           </button>
