@@ -24,7 +24,8 @@ function toDateSafe(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export default function Dashboard() {
+// ✅ IMPORTANT: named export (matches main.jsx import)
+export function DashboardPage() {
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
@@ -43,29 +44,6 @@ export default function Dashboard() {
 
   const [pageErr, setPageErr] = useState("");
 
-  // DEBUG STATE (visible in UI)
-  const [dbg, setDbg] = useState({
-    step: "init",
-    userEmail: "",
-    userId: "",
-    accountId: "",
-    session: "unknown", // yes/no/unknown
-    companiesCount: 0,
-    selectedCompanyId: "",
-    lastCompanyErr: "",
-    lastPageErr: "",
-    lastAlertsErr: "",
-    ts: "",
-  });
-
-  const stampDbg = useCallback((patch) => {
-    setDbg((prev) => ({
-      ...prev,
-      ...patch,
-      ts: new Date().toISOString(),
-    }));
-  }, []);
-
   const storageKey = useMemo(() => {
     // user-specific so one mobile browser can switch users safely
     const uid = user?.id || "anon";
@@ -73,36 +51,14 @@ export default function Dashboard() {
   }, [user?.id]);
 
   const loadUserAndAccount = useCallback(async () => {
-    stampDbg({ step: "loadUserAndAccount:start" });
-
-    // Confirm session exists (helps diagnose race conditions)
-    const { data: sessData, error: sessErr } = await supabase.auth.getSession();
-    if (sessErr) {
-      stampDbg({ step: "loadUserAndAccount:sessionError" });
-      throw sessErr;
-    }
-
-    const hasSession = !!sessData?.session;
-    stampDbg({ session: hasSession ? "yes" : "no" });
-
     const { data, error } = await supabase.auth.getUser();
-    if (error) {
-      stampDbg({ step: "loadUserAndAccount:getUserError" });
-      throw error;
-    }
+    if (error) throw error;
 
     const u = data?.user || null;
     setUser(u);
 
-    stampDbg({
-      step: "loadUserAndAccount:gotUser",
-      userEmail: u?.email || "",
-      userId: u?.id || "",
-    });
-
     if (!u) {
       setAccountId("");
-      stampDbg({ step: "loadUserAndAccount:noUser", accountId: "" });
       return;
     }
 
@@ -113,33 +69,18 @@ export default function Dashboard() {
       .eq("id", u.id)
       .single();
 
-    if (uerr) {
-      stampDbg({ step: "loadUserAndAccount:usersTableError" });
-      throw uerr;
-    }
-
-    const aid = urow?.account_id || "";
-    setAccountId(aid);
-
-    stampDbg({ step: "loadUserAndAccount:done", accountId: aid });
-  }, [stampDbg]);
+    if (uerr) throw uerr;
+    setAccountId(urow?.account_id || "");
+  }, []);
 
   const loadCompanies = useCallback(async () => {
-    stampDbg({ step: "loadCompanies:start" });
-
     setLoadingCompanies(true);
     setCompanyErr("");
-
     try {
       const { data, error } = await supabase
         .from("companies")
         .select("id, name, created_at")
         .order("name", { ascending: true });
-
-      stampDbg({
-        step: "loadCompanies:response",
-        companiesCount: Array.isArray(data) ? data.length : 0,
-      });
 
       if (error) throw error;
 
@@ -152,65 +93,37 @@ export default function Dashboard() {
       const initial = savedExists ? saved : list[0]?.id || "";
 
       setSelectedCompanyId(initial);
-      stampDbg({ selectedCompanyId: initial });
-
       if (initial) localStorage.setItem(storageKey, initial);
-
-      stampDbg({ step: "loadCompanies:done" });
     } catch (e) {
       setCompanies([]);
       setSelectedCompanyId("");
-
-      const msg = e?.message || "Failed to load companies.";
-      setCompanyErr(msg);
-
-      stampDbg({
-        step: "loadCompanies:error",
-        lastCompanyErr: msg,
-      });
+      setCompanyErr(e?.message || "Failed to load companies.");
     } finally {
       setLoadingCompanies(false);
-      stampDbg({ step: "loadCompanies:finally" });
     }
-  }, [storageKey, stampDbg]);
+  }, [storageKey]);
 
-  const loadSitesForCompany = useCallback(
-    async (companyId) => {
-      stampDbg({ step: "loadSitesForCompany:start" });
+  const loadSitesForCompany = useCallback(async (companyId) => {
+    if (!companyId) {
+      setSites([]);
+      return [];
+    }
 
-      if (!companyId) {
-        setSites([]);
-        stampDbg({ step: "loadSitesForCompany:noCompany" });
-        return [];
-      }
+    const { data, error } = await supabase
+      .from("sites")
+      .select("id, company_id, name, code")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true });
 
-      const { data, error } = await supabase
-        .from("sites")
-        .select("id, company_id, name, code")
-        .eq("company_id", companyId)
-        .order("name", { ascending: true });
+    if (error) throw error;
 
-      if (error) {
-        stampDbg({ step: "loadSitesForCompany:error" });
-        throw error;
-      }
-
-      const list = data || [];
-      setSites(list);
-
-      stampDbg({
-        step: "loadSitesForCompany:done",
-      });
-
-      return list;
-    },
-    [stampDbg]
-  );
+    const list = data || [];
+    setSites(list);
+    return list;
+  }, []);
 
   const loadEquipmentAlerts = useCallback(
     async (companyId) => {
-      stampDbg({ step: "loadEquipmentAlerts:start" });
-
       if (!companyId) return;
 
       setLoadingAlerts(true);
@@ -222,7 +135,6 @@ export default function Dashboard() {
 
         if (siteIds.length === 0) {
           setAlerts([]);
-          stampDbg({ step: "loadEquipmentAlerts:noSites" });
           return;
         }
 
@@ -236,7 +148,6 @@ export default function Dashboard() {
         const assetList = assets || [];
         if (assetList.length === 0) {
           setAlerts([]);
-          stampDbg({ step: "loadEquipmentAlerts:noAssets" });
           return;
         }
 
@@ -294,79 +205,47 @@ export default function Dashboard() {
         });
 
         setAlerts(rows);
-
-        stampDbg({
-          step: "loadEquipmentAlerts:done",
-          lastAlertsErr: "",
-        });
       } catch (e) {
         setAlerts([]);
-        const msg = e?.message || "Failed to load equipment alerts.";
-        setPageErr(msg);
-
-        stampDbg({
-          step: "loadEquipmentAlerts:error",
-          lastAlertsErr: msg,
-        });
+        setPageErr(e?.message || "Failed to load equipment alerts.");
       } finally {
         setLoadingAlerts(false);
-        stampDbg({ step: "loadEquipmentAlerts:finally" });
       }
     },
-    [loadSitesForCompany, stampDbg]
+    [loadSitesForCompany]
   );
 
   // Initial load
   useEffect(() => {
     let alive = true;
-
     (async () => {
       try {
         setPageErr("");
-        stampDbg({ step: "initialLoad:start" });
-
         await loadUserAndAccount();
-        if (!alive) return;
-
         await loadCompanies();
-        if (!alive) return;
-
-        stampDbg({ step: "initialLoad:done" });
       } catch (e) {
         if (!alive) return;
-
-        const msg = e?.message || "Failed to load dashboard.";
-        setPageErr(msg);
-
-        stampDbg({
-          step: "initialLoad:error",
-          lastPageErr: msg,
-        });
+        setPageErr(e?.message || "Failed to load dashboard.");
       }
     })();
-
     return () => {
       alive = false;
     };
-  }, [loadUserAndAccount, loadCompanies, stampDbg]);
+  }, [loadUserAndAccount, loadCompanies]);
 
   // When company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
-
     localStorage.setItem(storageKey, selectedCompanyId);
-    stampDbg({ selectedCompanyId });
-
     loadEquipmentAlerts(selectedCompanyId);
-  }, [selectedCompanyId, storageKey, loadEquipmentAlerts, stampDbg]);
+  }, [selectedCompanyId, storageKey, loadEquipmentAlerts]);
 
   const resetCompanySelection = async () => {
     localStorage.removeItem(storageKey);
     await loadCompanies();
   };
 
-  const selectedCompany =
-    companies.find((c) => c.id === selectedCompanyId) || null;
+  const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || null;
 
   return (
     <AppLayout>
@@ -378,35 +257,12 @@ export default function Dashboard() {
           <div className="wi-muted">Signed in as: {user?.email || "—"}</div>
         </Card>
 
-        {/* DEBUG CARD (remove once resolved) */}
-        <Card>
-          <div className="wi-card__title">Debug</div>
-          <div className="wi-muted">Step: {dbg.step}</div>
-          <div className="wi-muted">Timestamp: {dbg.ts}</div>
-          <div className="wi-muted">Session: {dbg.session}</div>
-          <div className="wi-muted">User: {dbg.userEmail || "—"}</div>
-          <div className="wi-muted">User ID: {dbg.userId || "—"}</div>
-          <div className="wi-muted">Account ID: {dbg.accountId || accountId || "—"}</div>
-          <div className="wi-muted">Companies count: {dbg.companiesCount}</div>
-          <div className="wi-muted">Selected company: {dbg.selectedCompanyId || selectedCompanyId || "—"}</div>
-          {dbg.lastCompanyErr ? (
-            <div className="wi-error">Companies error: {dbg.lastCompanyErr}</div>
-          ) : null}
-          {dbg.lastPageErr ? (
-            <div className="wi-error">Page error: {dbg.lastPageErr}</div>
-          ) : null}
-          {dbg.lastAlertsErr ? (
-            <div className="wi-error">Alerts error: {dbg.lastAlertsErr}</div>
-          ) : null}
-        </Card>
-
         <Card>
           <div className="wi-card__titleRow">
             <div>
               <div className="wi-card__title">Company</div>
               <div className="wi-card__sub">
-                Select a company to view data across all sites under that
-                company.
+                Select a company to view data across all sites under that company.
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -457,22 +313,17 @@ export default function Dashboard() {
             <div>
               <div className="wi-card__title">Equipment alerts</div>
               <div className="wi-card__sub">
-                Overdue and due within 30 days (earliest of Inspection / LOLER /
-                Service / PUWER).
+                Overdue and due within 30 days (earliest of Inspection / LOLER / Service / PUWER).
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button
-                onClick={() =>
-                  selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)
-                }
+                onClick={() => selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)}
                 disabled={!selectedCompanyId || loadingAlerts}
               >
                 {loadingAlerts ? "Loading..." : "Reload"}
               </Button>
-              <Button onClick={() => navigate("/mhe-setup")}>
-                Open MHE setup
-              </Button>
+              <Button onClick={() => navigate("/mhe-setup")}>Open MHE setup</Button>
             </div>
           </div>
 
@@ -500,9 +351,7 @@ export default function Dashboard() {
                   {alerts.map((r, idx) => (
                     <tr
                       key={idx}
-                      className={
-                        r.status === "overdue" ? "wi-row--bad" : "wi-row--warn"
-                      }
+                      className={r.status === "overdue" ? "wi-row--bad" : "wi-row--warn"}
                     >
                       <td>{r.siteName}</td>
                       <td>{r.assetTag}</td>
@@ -522,14 +371,14 @@ export default function Dashboard() {
         <Card>
           <div className="wi-card__title">Scheduling tool</div>
           <div className="wi-card__sub">
-            Plan MHE and labour, track indirect time, and compare plan vs actual
-            by shift.
+            Plan MHE and labour, track indirect time, and compare plan vs actual by shift.
           </div>
-          <Button onClick={() => navigate("/scheduling-tool")}>
-            Open scheduling tool
-          </Button>
+          <Button onClick={() => navigate("/scheduling-tool")}>Open scheduling tool</Button>
         </Card>
       </div>
     </AppLayout>
   );
 }
+
+// ✅ Optional but fine: default export too (doesn't affect main.jsx)
+export default DashboardPage;

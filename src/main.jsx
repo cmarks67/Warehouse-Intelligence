@@ -8,7 +8,9 @@ import { ProtectedRoute } from "./auth/ProtectedRoute";
 
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
-import { DashboardPage } from "./pages/DashboardPage";
+
+// ✅ FIX: default import (matches `export default function DashboardPage()`)
+import DashboardPage from "./pages/DashboardPage";
 
 import { UsersPage } from "./pages/UsersPage";
 import { PasswordPage } from "./pages/PasswordPage";
@@ -47,7 +49,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             element={<Navigate to="/app/setup/companies-sites" replace />}
           />
           <Route path="/setup/mhe" element={<Navigate to="/app/setup/mhe" replace />} />
-          <Route path="/setup/colleagues" element={<Navigate to="/app/setup/colleagues" replace />} />
+          <Route
+            path="/setup/colleagues"
+            element={<Navigate to="/app/setup/colleagues" replace />}
+          />
           <Route
             path="/setup/mhe-training"
             element={<Navigate to="/app/setup/mhe-training" replace />}
