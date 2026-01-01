@@ -1,3 +1,4 @@
+// src/pages/DashboardPage.jsx
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -19,11 +20,30 @@ function toDateSafe(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/**
- * IMPORTANT:
- * - We export BOTH named + default so main.jsx can import { DashboardPage } safely,
- *   while also allowing default import if you ever switch later.
- */
+// IMPORTANT: declare ONLY ONCE
+function withTimeout(promise, ms, label = "request") {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
+// Your schema stores due dates on mhe_assets, so pick earliest from those columns
+function pickEarliestDue(asset) {
+  const candidates = [
+    { key: "Inspection", date: toDateSafe(asset.next_inspection_due) },
+    { key: "LOLER", date: toDateSafe(asset.next_loler_due) },
+    { key: "Service", date: toDateSafe(asset.next_service_due) },
+    { key: "PUWER", date: toDateSafe(asset.next_puwer_due) },
+  ].filter((x) => !!x.date);
+
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return candidates[0]; // { key, date }
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -48,30 +68,19 @@ export function DashboardPage() {
     return `wi.selectedCompanyId.${uid}`;
   }, [user?.id]);
 
-  /**
-   * Robust auth handling:
-   * - getUser() throws "Auth session missing!" when no session.
-   * - We should treat that as "not signed in" and redirect to /login.
-   */
   const loadUserAndAccount = useCallback(async () => {
-    // Step 1: check session first (no throw)
-    const { data: sessData, error: sessErr } = await supabase.auth.getSession();
+    // Use session so it works reliably on refresh
+    const { data: sess, error: sessErr } = await supabase.auth.getSession();
     if (sessErr) throw sessErr;
 
-    const session = sessData?.session || null;
-    const u = session?.user || null;
-
+    const u = sess?.session?.user || null;
     setUser(u);
 
     if (!u) {
       setAccountId("");
-      // If your app requires auth for dashboard, push to login.
-      // If you prefer a "public" dashboard shell, remove this navigate.
-      navigate("/login", { replace: true });
       return;
     }
 
-    // Step 2: pull account_id from public.users
     const { data: urow, error: uerr } = await supabase
       .from("users")
       .select("account_id")
@@ -80,12 +89,11 @@ export function DashboardPage() {
 
     if (uerr) throw uerr;
     setAccountId(urow?.account_id || "");
-  }, [navigate]);
+  }, []);
 
   const loadCompanies = useCallback(async () => {
     setLoadingCompanies(true);
     setCompanyErr("");
-
     try {
       const { data, error } = await supabase
         .from("companies")
@@ -97,7 +105,6 @@ export function DashboardPage() {
       const list = data || [];
       setCompanies(list);
 
-      // Determine initial selection
       const saved = localStorage.getItem(storageKey) || "";
       const savedExists = saved && list.some((c) => c.id === saved);
       const initial = savedExists ? saved : list[0]?.id || "";
@@ -141,17 +148,38 @@ export function DashboardPage() {
 
       try {
         const companySites = await loadSitesForCompany(companyId);
-        const siteIds = companySites.map((s) => s.id);
+        const siteIds = (companySites || []).map((s) => s.id);
 
         if (siteIds.length === 0) {
           setAlerts([]);
           return;
         }
 
-        const { data: assets, error: assetsErr } = await supabase
-          .from("mhe_assets")
-          .select("id, site_id, asset_tag, type, status")
-          .in("site_id", siteIds);
+        // OPTION B (Robust):
+        // Due dates are stored on mhe_assets (per your schema).
+        // Join mhe_types via the explicit FK constraint name to avoid relationship naming issues.
+        const { data: assets, error: assetsErr } = await withTimeout(
+          supabase
+            .from("mhe_assets")
+            .select(
+              `
+              id,
+              site_id,
+              asset_tag,
+              status,
+              next_inspection_due,
+              next_loler_due,
+              next_service_due,
+              next_puwer_due,
+              mhe_types:mhe_types!mhe_assets_mhe_type_id_fkey (
+                type_name
+              )
+            `
+            )
+            .in("site_id", siteIds),
+          12000,
+          "mhe_assets select"
+        );
 
         if (assetsErr) throw assetsErr;
 
@@ -161,52 +189,36 @@ export function DashboardPage() {
           return;
         }
 
-        const assetIds = assetList.map((a) => a.id);
-
-        const { data: inspRows, error: inspErr } = await supabase
-          .from("mhe_inspections")
-          .select("asset_id, inspection_type, next_due_date")
-          .in("asset_id", assetIds);
-
-        if (inspErr) throw inspErr;
-
-        // Earliest next_due_date per asset
-        const nextDueByAsset = new Map();
-        for (const r of inspRows || []) {
-          const due = toDateSafe(r.next_due_date);
-          if (!due) continue;
-
-          const existing = nextDueByAsset.get(r.asset_id);
-          if (!existing || due.getTime() < existing.due.getTime()) {
-            nextDueByAsset.set(r.asset_id, {
-              due,
-              inspectionType: r.inspection_type || "Inspection",
-            });
-          }
-        }
-
         const today = new Date();
         const rows = [];
 
-        // Build rows for overdue / due soon
-        const siteById = new Map(companySites.map((s) => [s.id, s]));
-
         for (const a of assetList) {
-          const nd = nextDueByAsset.get(a.id);
-          if (!nd) continue;
+          // If you later add statuses like retired, you can filter here
+          // if (a.status && a.status !== "active") continue;
 
-          const days = daysBetween(today, nd.due);
+          const earliest = pickEarliestDue(a);
+          if (!earliest) continue;
+
+          const days = daysBetween(today, earliest.date);
           const status = days < 0 ? "overdue" : days <= 30 ? "due_soon" : "ok";
           if (status === "ok") continue;
 
-          const site = siteById.get(a.site_id);
+          const site = companySites.find((s) => s.id === a.site_id);
+
+          // relation can be object or array depending on PostgREST shape
+          let typeName = "";
+          const rel = a.mhe_types;
+          if (rel) {
+            if (Array.isArray(rel)) typeName = rel[0]?.type_name || "";
+            else typeName = rel?.type_name || "";
+          }
 
           rows.push({
             siteName: site?.name || "Unknown site",
             assetTag: a.asset_tag || "",
-            type: a.type || "",
-            nextDueType: nd.inspectionType,
-            dueDate: nd.due.toISOString().slice(0, 10),
+            typeName: typeName || "",
+            nextDueType: earliest.key,
+            dueDate: earliest.date.toISOString().slice(0, 10),
             days,
             status,
           });
@@ -230,7 +242,7 @@ export function DashboardPage() {
     [loadSitesForCompany]
   );
 
-  // Initial load
+  // Initial load + keep session in sync (prevents “Auth session missing” on refresh)
   useEffect(() => {
     let alive = true;
 
@@ -238,7 +250,6 @@ export function DashboardPage() {
       try {
         setPageErr("");
         await loadUserAndAccount();
-        // If loadUserAndAccount redirected to /login, user will be null; still safe.
         await loadCompanies();
       } catch (e) {
         if (!alive) return;
@@ -246,8 +257,36 @@ export function DashboardPage() {
       }
     })();
 
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!alive) return;
+
+      const u = session?.user || null;
+      setUser(u);
+
+      if (!u) {
+        setAccountId("");
+        setCompanies([]);
+        setSelectedCompanyId("");
+        setSites([]);
+        setAlerts([]);
+        return;
+      }
+
+      try {
+        const { data: urow, error: uerr } = await supabase
+          .from("users")
+          .select("account_id")
+          .eq("id", u.id)
+          .single();
+        if (!uerr) setAccountId(urow?.account_id || "");
+      } catch {
+        // ignore
+      }
+    });
+
     return () => {
       alive = false;
+      sub?.subscription?.unsubscribe?.();
     };
   }, [loadUserAndAccount, loadCompanies]);
 
@@ -263,8 +302,7 @@ export function DashboardPage() {
     await loadCompanies();
   };
 
-  const selectedCompany =
-    companies.find((c) => c.id === selectedCompanyId) || null;
+  const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || null;
 
   return (
     <AppLayout>
@@ -332,22 +370,17 @@ export function DashboardPage() {
             <div>
               <div className="wi-card__title">Equipment alerts</div>
               <div className="wi-card__sub">
-                Overdue and due within 30 days (earliest of Inspection / LOLER /
-                Service / PUWER).
+                Overdue and due within 30 days (earliest of Inspection / LOLER / Service / PUWER).
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button
-                onClick={() =>
-                  selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)
-                }
+                onClick={() => selectedCompanyId && loadEquipmentAlerts(selectedCompanyId)}
                 disabled={!selectedCompanyId || loadingAlerts}
               >
                 {loadingAlerts ? "Loading..." : "Reload"}
               </Button>
-              <Button onClick={() => navigate("/mhe-setup")}>
-                Open MHE setup
-              </Button>
+              <Button onClick={() => navigate("/mhe-setup")}>Open MHE setup</Button>
             </div>
           </div>
 
@@ -379,7 +412,7 @@ export function DashboardPage() {
                     >
                       <td>{r.siteName}</td>
                       <td>{r.assetTag}</td>
-                      <td>{r.type}</td>
+                      <td>{r.typeName || "—"}</td>
                       <td>{r.nextDueType}</td>
                       <td>{r.dueDate}</td>
                       <td>{r.days}</td>
@@ -395,16 +428,14 @@ export function DashboardPage() {
         <Card>
           <div className="wi-card__title">Scheduling tool</div>
           <div className="wi-card__sub">
-            Plan MHE and labour, track indirect time, and compare plan vs actual by
-            shift.
+            Plan MHE and labour, track indirect time, and compare plan vs actual by shift.
           </div>
-          <Button onClick={() => navigate("/scheduling-tool")}>
-            Open scheduling tool
-          </Button>
+          <Button onClick={() => navigate("/scheduling-tool")}>Open scheduling tool</Button>
         </Card>
       </div>
     </AppLayout>
   );
 }
 
+// Keep both exports so main.jsx can import either named or default safely
 export default DashboardPage;
