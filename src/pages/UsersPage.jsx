@@ -1,4 +1,3 @@
-// /src/pages/UsersPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -23,28 +22,6 @@ function shortAccountId(raw) {
   return "WI-" + String(raw).slice(0, 8).toUpperCase();
 }
 
-function extractSupabaseFnError(err) {
-  // Supabase Functions errors can be: FunctionsFetchError, FunctionsHttpError, FunctionsRelayError, etc.
-  // Some include err.context with status/body.
-  const out = {
-    name: err?.name || "",
-    message: err?.message || String(err),
-    status: err?.context?.status,
-    body: err?.context?.body,
-  };
-
-  // If body is a stringified JSON, try to parse for readability
-  if (typeof out.body === "string") {
-    try {
-      out.body = JSON.parse(out.body);
-    } catch {
-      // leave as-is
-    }
-  }
-
-  return out;
-}
-
 /* ---------- page ---------- */
 
 export function UsersPage() {
@@ -59,7 +36,7 @@ export function UsersPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
 
-  // Invite form
+  // Invite form (no password fields)
   const [fullName, setFullName] = useState("");
   const [newEmail, setNewEmail] = useState("");
 
@@ -113,7 +90,11 @@ export function UsersPage() {
 
     setHeaderEmail(authUser.email || "");
 
-    const { data: p, error: pe } = await supabase.from("users").select("*").eq("id", authUser.id).single();
+    const { data: p, error: pe } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", authUser.id)
+      .single();
 
     if (pe || !p) {
       const fallback = {
@@ -128,12 +109,8 @@ export function UsersPage() {
       };
 
       const { error: ue } = await supabase.from("users").upsert(fallback);
-
       if (ue) {
-        setMsg({
-          type: "error",
-          text: "Unable to load/create profile: " + ue.message,
-        });
+        setMsg({ type: "error", text: "Unable to load/create profile: " + ue.message });
         return;
       }
 
@@ -172,15 +149,9 @@ export function UsersPage() {
       });
       if (error) throw error;
 
-      setMsg({
-        type: "success",
-        text: `Password reset email sent to ${targetEmail}.`,
-      });
+      setMsg({ type: "success", text: `Password reset email sent to ${targetEmail}.` });
     } catch (e) {
-      setMsg({
-        type: "error",
-        text: "Reset failed: " + (e?.message || e),
-      });
+      setMsg({ type: "error", text: "Reset failed: " + (e?.message || e) });
     } finally {
       setBusy(false);
     }
@@ -196,10 +167,7 @@ export function UsersPage() {
 
       await loadUsersByAccount(profile.account_id);
     } catch (e) {
-      setMsg({
-        type: "error",
-        text: "Promote failed: " + (e?.message || e),
-      });
+      setMsg({ type: "error", text: "Promote failed: " + (e?.message || e) });
     } finally {
       setBusy(false);
     }
@@ -215,10 +183,7 @@ export function UsersPage() {
 
       await loadUsersByAccount(profile.account_id);
     } catch (e) {
-      setMsg({
-        type: "error",
-        text: "Deactivate failed: " + (e?.message || e),
-      });
+      setMsg({ type: "error", text: "Deactivate failed: " + (e?.message || e) });
     } finally {
       setBusy(false);
     }
@@ -234,10 +199,7 @@ export function UsersPage() {
     const name = (fullName || "").trim();
 
     if (!email || !email.includes("@")) {
-      setMsg({
-        type: "error",
-        text: `Email address "${email}" is invalid`,
-      });
+      setMsg({ type: "error", text: `Email address "${email}" is invalid` });
       return;
     }
 
@@ -247,51 +209,34 @@ export function UsersPage() {
     }
 
     if (!isAdmin || !isBusinessDerived) {
-      setMsg({
-        type: "error",
-        text: "You are not allowed to add users.",
-      });
+      setMsg({ type: "error", text: "You are not allowed to add users." });
       return;
     }
 
     setBusy(true);
     try {
-      // ✅ Diagnostics (does not change behaviour)
-      const sbUrl = supabase?.supabaseUrl;
-      const fnUrl = sbUrl ? `${sbUrl}/functions/v1/invite-user` : "(unknown)";
-      console.log("SUPABASE_URL =", sbUrl);
-      console.log("EDGE_FN_URL  =", fnUrl);
-
       const { data, error } = await supabase.functions.invoke("invite-user", {
         body: { email, full_name: name },
       });
 
-      if (error) throw error;
-      if (!data?.ok) throw new Error("Invite failed.");
+      if (error) {
+        // Supabase wraps fetch failures (incl CORS) as FunctionsFetchError
+        throw error;
+      }
+      if (!data?.ok) {
+        throw new Error(data?.error || "Invite failed.");
+      }
 
-      setMsg({
-        type: "success",
-        text: `Invite sent to ${email}.`,
-      });
-
+      setMsg({ type: "success", text: `Invite sent to ${email}.` });
       setFullName("");
       setNewEmail("");
 
       await loadUsersByAccount(profile.account_id);
     } catch (e2) {
-      console.error("Invite error (raw):", e2);
-
-      const info = extractSupabaseFnError(e2);
-      console.error("Invite error (parsed):", info);
-
-      // Show a more actionable message in the UI
-      let ui = info.message || "Invite failed.";
-      if (info.status) ui += ` (HTTP ${info.status})`;
-      if (info.body) ui += ` | ${typeof info.body === "string" ? info.body : JSON.stringify(info.body)}`;
-
+      console.error("Invite failed:", e2);
       setMsg({
         type: "error",
-        text: ui,
+        text: e2?.message || "Failed to send a request to the Edge Function",
       });
     } finally {
       setBusy(false);
@@ -305,7 +250,7 @@ export function UsersPage() {
       <Card title="Account">
         <div className="wi-muted">{profile?.full_name || ""}</div>
 
-        <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+        <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span className={`wi-badge ${isAdmin ? "admin" : "standard"}`}>{isAdmin ? "Admin" : "Standard"}</span>
           <span className={`wi-badge ${isBusinessDerived ? "business" : "single_user"}`}>
             {isBusinessDerived ? "Business" : "Single user"}
@@ -325,51 +270,61 @@ export function UsersPage() {
           <div style={{ marginBottom: 10, color: msg.type === "error" ? "#b91c1c" : "#166534" }}>{msg.text}</div>
         )}
 
-        <table className="wi-table">
-          <thead>
-            <tr>
-              <th>Email</th>
-              <th>Name</th>
-              <th>Role</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => {
-              const isSelf = u.id === profile?.id;
-              const canManage = isAdmin && !isSelf;
+        <div style={{ marginTop: 12, overflow: "auto" }}>
+          <table className="wi-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => {
+                const isSelf = u.id === profile?.id;
+                const canManage = isAdmin && !isSelf;
 
-              return (
-                <tr key={u.id}>
-                  <td>{u.email}</td>
-                  <td>{u.full_name}</td>
-                  <td>{u.role}</td>
-                  <td>{fmtDate(u.created_at)}</td>
-                  <td>
-                    {canManage ? (
-                      <>
-                        <Button variant="secondary" onClick={() => adminResetEmail(u.email)} disabled={busy}>
-                          Reset
-                        </Button>
-                        {u.role !== "admin" && (
-                          <Button variant="secondary" onClick={() => adminPromote(u.id)} disabled={busy}>
-                            Promote
+                return (
+                  <tr key={u.id}>
+                    <td>{u.email}</td>
+                    <td>{u.full_name}</td>
+                    <td>{u.role}</td>
+                    <td>{fmtDate(u.created_at)}</td>
+                    <td>
+                      {canManage ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <Button variant="secondary" disabled={busy} onClick={() => adminResetEmail(u.email)}>
+                            Reset
                           </Button>
-                        )}
-                        <Button variant="danger" onClick={() => adminDeactivate(u.id)} disabled={busy}>
-                          Delete
-                        </Button>
-                      </>
-                    ) : (
-                      <span className="wi-muted">This is you</span>
-                    )}
+                          {u.role !== "admin" && (
+                            <Button variant="secondary" disabled={busy} onClick={() => adminPromote(u.id)}>
+                              Promote
+                            </Button>
+                          )}
+                          <Button variant="danger" disabled={busy} onClick={() => adminDeactivate(u.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="wi-muted">{isSelf ? "This is you" : ""}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {!users.length && (
+                <tr>
+                  <td colSpan={5} className="wi-muted" style={{ padding: 8 }}>
+                    No users found.
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       {isBusinessDerived && isAdmin && (
