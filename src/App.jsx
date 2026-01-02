@@ -1,40 +1,114 @@
 // /src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 
-import { DashboardPage } from "./pages/DashboardPage";
+import { ProtectedRoute } from "./auth/ProtectedRoute";
+
+import { Home } from "./pages/Home";
+import { Login } from "./pages/Login";
+
+// Pages
+import DashboardPage from "./pages/DashboardPage"; // default export in your repo
 import { UsersPage } from "./pages/UsersPage";
 import { PasswordPage } from "./pages/PasswordPage";
+
 import MasterData from "./pages/MasterData";
 import MheSetup from "./pages/MheSetup";
-import SchedulingTool from "./pages/SchedulingTool";
-
 import ColleaguesSetup from "./pages/ColleaguesSetup";
-
 import MheTrainingSetup from "./pages/MheTrainingSetup";
-
+import SchedulingTool from "./pages/SchedulingTool";
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
+      {/* Public */}
+      <Route path="/" element={<Home />} />
+      <Route path="/login" element={<Login />} />
 
-      <Route path="/app/dashboard" element={<DashboardPage />} />
+      {/* Convenience redirects */}
+      <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
 
-      {/* Setup */}
-      <Route path="/app/setup/companies-sites" element={<MasterData />} />
-      <Route path="/app/setup/mhe" element={<MheSetup />} />
-      <Route path="/app/setup/colleagues" element={<ColleaguesSetup />} />
-<Route path="/app/setup/mhe-training" element={<MheTrainingSetup />} />
-      {/* Tools */}
-      <Route path="/app/tools/scheduling" element={<SchedulingTool />} />
+      {/* Aliases (support sidebar/old links without /app) */}
+      <Route path="/dashboard" element={<Navigate to="/app/dashboard" replace />} />
+      <Route path="/setup/companies-sites" element={<Navigate to="/app/setup/companies-sites" replace />} />
+      <Route path="/setup/mhe" element={<Navigate to="/app/setup/mhe" replace />} />
+      <Route path="/setup/colleagues" element={<Navigate to="/app/setup/colleagues" replace />} />
+      <Route path="/setup/mhe-training" element={<Navigate to="/app/setup/mhe-training" replace />} />
+      <Route path="/tools/scheduling" element={<Navigate to="/app/tools/scheduling" replace />} />
+
+      {/* Protected app routes */}
+      <Route
+        path="/app/dashboard"
+        element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
 
       {/* Settings */}
-      <Route path="/app/users" element={<UsersPage />} />
-      <Route path="/app/password" element={<PasswordPage />} />
+      <Route
+        path="/app/users"
+        element={
+          <ProtectedRoute>
+            <UsersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/password"
+        element={
+          <ProtectedRoute>
+            <PasswordPage />
+          </ProtectedRoute>
+        }
+      />
 
+      {/* Setup */}
+      <Route
+        path="/app/setup/companies-sites"
+        element={
+          <ProtectedRoute>
+            <MasterData />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/setup/mhe"
+        element={
+          <ProtectedRoute>
+            <MheSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/setup/colleagues"
+        element={
+          <ProtectedRoute>
+            <ColleaguesSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/setup/mhe-training"
+        element={
+          <ProtectedRoute>
+            <MheTrainingSetup />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Tools */}
+      <Route
+        path="/app/tools/scheduling"
+        element={
+          <ProtectedRoute>
+            <SchedulingTool />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Catch-all */}
       <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
-      
     </Routes>
   );
 }
-

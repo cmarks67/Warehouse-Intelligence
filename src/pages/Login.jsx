@@ -48,26 +48,42 @@ export function Login() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [accountType, setAccountType] = useState("business"); // business | single_user
 
-  const [busy, setBusy] = useState(false);
+  // Separate busy states (prevents cross-tab interference)
+  const [busySignIn, setBusySignIn] = useState(false);
+  const [busyCreate, setBusyCreate] = useState(false);
+  const [busyReset, setBusyReset] = useState(false);
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const from = loc.state?.from || "/app";
-
   const strength = useMemo(() => strengthUI(createPassword), [createPassword]);
+
+  const clearAlerts = () => {
+    setError("");
+    setMessage("");
+  };
 
   const onSignIn = async (e) => {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    setMessage("");
+    clearAlerts();
 
+    const email = signinEmail.trim();
+    if (!email) {
+      setError("Enter your email to sign in.");
+      return;
+    }
+    if (!signinPassword) {
+      setError("Enter your password to sign in.");
+      return;
+    }
+
+    setBusySignIn(true);
     const { error } = await supabase.auth.signInWithPassword({
-      email: signinEmail.trim(),
+      email,
       password: signinPassword,
     });
-
-    setBusy(false);
+    setBusySignIn(false);
 
     if (error) {
       setError(`Sign in failed: ${error.message}`);
@@ -79,32 +95,44 @@ export function Login() {
 
   const onCreateAccount = async (e) => {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    setMessage("");
+    clearAlerts();
 
+    const email = createEmail.trim();
+    const name = fullName.trim();
+
+    if (!name) {
+      setError("Full name is required.");
+      return;
+    }
+    if (!email) {
+      setError("Email is required.");
+      return;
+    }
+    if (!createPassword || createPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     if (createPassword !== confirmPassword) {
-      setBusy(false);
       setError("Passwords do not match. Please check and try again.");
       return;
     }
 
     // IMPORTANT:
     // - account_type must match your DB constraint: 'business' | 'single_user'
-    // - The DB trigger/server-side logic should create:
+    // - DB trigger/server-side logic should create:
     //   public.accounts (plan) + public.users (role/account_type/account_id/business_owner_id)
+    setBusyCreate(true);
     const { error } = await supabase.auth.signUp({
-      email: createEmail.trim(),
+      email,
       password: createPassword,
       options: {
         data: {
-          full_name: fullName.trim(),
+          full_name: name,
           account_type: accountType, // 'business' or 'single_user'
         },
       },
     });
-
-    setBusy(false);
+    setBusyCreate(false);
 
     if (error) {
       setError(`Account creation failed: ${error.message}`);
@@ -117,23 +145,23 @@ export function Login() {
 
   const onForgotPassword = async (e) => {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    setMessage("");
+    clearAlerts();
 
-    if (!signinEmail) {
-      setBusy(false);
+    const email = signinEmail.trim();
+    if (!email) {
       setError("Enter your email first, then click “Forgot password?”.");
       return;
     }
 
-    // Align redirect behaviour with the rest of the app
-    // (Make sure this URL is in Supabase Auth Redirect URLs.)
-    const { error } = await supabase.auth.resetPasswordForEmail(signinEmail.trim(), {
-      redirectTo: "https://warehouseintelligence.co.uk/password-reset.html",
-    });
+    // Prefer env-based redirect so dev/staging/prod behave correctly.
+    // Make sure this URL is allowed in Supabase Auth Redirect URLs.
+    const redirectTo =
+      import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL ||
+      "https://warehouseintelligence.co.uk/password-reset.html";
 
-    setBusy(false);
+    setBusyReset(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    setBusyReset(false);
 
     if (error) {
       setError(`Password reset failed: ${error.message}`);
@@ -163,7 +191,10 @@ export function Login() {
           <button
             type="button"
             className={`tab-button ${tab === "signin" ? "active" : ""}`}
-            onClick={() => setTab("signin")}
+            onClick={() => {
+              clearAlerts();
+              setTab("signin");
+            }}
             role="tab"
             aria-selected={tab === "signin"}
           >
@@ -172,7 +203,10 @@ export function Login() {
           <button
             type="button"
             className={`tab-button ${tab === "create" ? "active" : ""}`}
-            onClick={() => setTab("create")}
+            onClick={() => {
+              clearAlerts();
+              setTab("create");
+            }}
             role="tab"
             aria-selected={tab === "create"}
           >
@@ -218,16 +252,21 @@ export function Login() {
                 <div className="inline-row">
                   <div className="helper-text">Use your registered password to access your account.</div>
                   <div className="forgot-password">
-                    <a href="#" onClick={onForgotPassword}>
-                      Forgot password?
-                    </a>
+                    <button
+                      type="button"
+                      className="linklike"
+                      onClick={onForgotPassword}
+                      disabled={busyReset || busySignIn}
+                    >
+                      {busyReset ? "Sending..." : "Forgot password?"}
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <button className="primary-btn" type="submit" disabled={busy}>
-              {busy ? "Signing in..." : "Sign in"}
+            <button className="primary-btn" type="submit" disabled={busySignIn || busyReset}>
+              {busySignIn ? "Signing in..." : "Sign in"}
             </button>
           </form>
         </section>
@@ -317,8 +356,8 @@ export function Login() {
               </div>
             </div>
 
-            <button className="primary-btn" type="submit" disabled={busy}>
-              {busy ? "Creating..." : "Create account"}
+            <button className="primary-btn" type="submit" disabled={busyCreate}>
+              {busyCreate ? "Creating..." : "Create account"}
             </button>
           </form>
 
