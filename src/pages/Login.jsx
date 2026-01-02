@@ -35,20 +35,20 @@ export function Login() {
   const nav = useNavigate();
   const loc = useLocation();
 
-  const [tab, setTab] = useState("signin"); // signin | create
+  const [tab, setTab] = useState("signin");
 
   // Sign in
   const [signinEmail, setSigninEmail] = useState("");
   const [signinPassword, setSigninPassword] = useState("");
 
-  // Create
+  // Create account
   const [fullName, setFullName] = useState("");
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [accountType, setAccountType] = useState("business"); // business | single_user
+  const [accountType, setAccountType] = useState("business");
 
-  // Separate busy states (prevents cross-tab interference)
+  // Busy states
   const [busySignIn, setBusySignIn] = useState(false);
   const [busyCreate, setBusyCreate] = useState(false);
   const [busyReset, setBusyReset] = useState(false);
@@ -69,12 +69,8 @@ export function Login() {
     clearAlerts();
 
     const email = signinEmail.trim();
-    if (!email) {
-      setError("Enter your email to sign in.");
-      return;
-    }
-    if (!signinPassword) {
-      setError("Enter your password to sign in.");
+    if (!email || !signinPassword) {
+      setError("Enter your email and password to sign in.");
       return;
     }
 
@@ -100,12 +96,8 @@ export function Login() {
     const email = createEmail.trim();
     const name = fullName.trim();
 
-    if (!name) {
-      setError("Full name is required.");
-      return;
-    }
-    if (!email) {
-      setError("Email is required.");
+    if (!name || !email) {
+      setError("Full name and email are required.");
       return;
     }
     if (!createPassword || createPassword.length < 8) {
@@ -113,22 +105,22 @@ export function Login() {
       return;
     }
     if (createPassword !== confirmPassword) {
-      setError("Passwords do not match. Please check and try again.");
+      setError("Passwords do not match.");
       return;
     }
 
-    // IMPORTANT:
-    // - account_type must match your DB constraint: 'business' | 'single_user'
-    // - DB trigger/server-side logic should create:
-    //   public.accounts (plan) + public.users (role/account_type/account_id/business_owner_id)
+    // ✅ FORCE CONFIRMATION REDIRECT TO PUBLIC HOME
+    const emailRedirectTo = "https://www.warehouseintelligence.co.uk/#/";
+
     setBusyCreate(true);
     const { error } = await supabase.auth.signUp({
       email,
       password: createPassword,
       options: {
+        emailRedirectTo,
         data: {
           full_name: name,
-          account_type: accountType, // 'business' or 'single_user'
+          account_type: accountType,
         },
       },
     });
@@ -139,7 +131,7 @@ export function Login() {
       return;
     }
 
-    setMessage("Account created. Check your email to confirm. Then sign in.");
+    setMessage("Account created. Check your email to confirm, then sign in.");
     setTab("signin");
   };
 
@@ -149,15 +141,11 @@ export function Login() {
 
     const email = signinEmail.trim();
     if (!email) {
-      setError("Enter your email first, then click “Forgot password?”.");
+      setError("Enter your email first.");
       return;
     }
 
-    // Prefer env-based redirect so dev/staging/prod behave correctly.
-    // Make sure this URL is allowed in Supabase Auth Redirect URLs.
-    const redirectTo =
-      import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL ||
-      "https://warehouseintelligence.co.uk/password-reset.html";
+    const redirectTo = "https://www.warehouseintelligence.co.uk/#/login";
 
     setBusyReset(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
@@ -168,7 +156,7 @@ export function Login() {
       return;
     }
 
-    setMessage("Password reset email sent. Please check your inbox.");
+    setMessage("Password reset email sent.");
   };
 
   return (
@@ -186,8 +174,7 @@ export function Login() {
           </div>
         </header>
 
-        {/* Tabs */}
-        <div className="tab-toggle" role="tablist" aria-label="Authentication tabs">
+        <div className="tab-toggle">
           <button
             type="button"
             className={`tab-button ${tab === "signin" ? "active" : ""}`}
@@ -195,8 +182,6 @@ export function Login() {
               clearAlerts();
               setTab("signin");
             }}
-            role="tab"
-            aria-selected={tab === "signin"}
           >
             Sign in
           </button>
@@ -207,8 +192,6 @@ export function Login() {
               clearAlerts();
               setTab("create");
             }}
-            role="tab"
-            aria-selected={tab === "create"}
           >
             Create account
           </button>
@@ -219,17 +202,14 @@ export function Login() {
         )}
 
         {/* SIGN IN */}
-        <section className={`tab-panel ${tab === "signin" ? "active" : ""}`} role="tabpanel">
+        <section className={`tab-panel ${tab === "signin" ? "active" : ""}`}>
           <form onSubmit={onSignIn}>
             <div className="form-grid">
               <div className="form-group">
-                <label htmlFor="signin-email">Email</label>
+                <label>Email</label>
                 <input
-                  id="signin-email"
-                  name="email"
                   type="email"
                   className="input"
-                  autoComplete="email"
                   required
                   value={signinEmail}
                   onChange={(e) => setSigninEmail(e.target.value)}
@@ -237,52 +217,44 @@ export function Login() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="signin-password">Password</label>
+                <label>Password</label>
                 <input
-                  id="signin-password"
-                  name="password"
                   type="password"
                   className="input"
-                  autoComplete="current-password"
                   required
                   value={signinPassword}
                   onChange={(e) => setSigninPassword(e.target.value)}
                 />
 
                 <div className="inline-row">
-                  <div className="helper-text">Use your registered password to access your account.</div>
-                  <div className="forgot-password">
-                    <button
-                      type="button"
-                      className="linklike"
-                      onClick={onForgotPassword}
-                      disabled={busyReset || busySignIn}
-                    >
-                      {busyReset ? "Sending..." : "Forgot password?"}
-                    </button>
-                  </div>
+                  <div className="helper-text">Use your registered password.</div>
+                  <button
+                    type="button"
+                    className="linklike"
+                    onClick={onForgotPassword}
+                    disabled={busyReset || busySignIn}
+                  >
+                    {busyReset ? "Sending..." : "Forgot password?"}
+                  </button>
                 </div>
               </div>
             </div>
 
-            <button className="primary-btn" type="submit" disabled={busySignIn || busyReset}>
+            <button className="primary-btn" disabled={busySignIn || busyReset}>
               {busySignIn ? "Signing in..." : "Sign in"}
             </button>
           </form>
         </section>
 
         {/* CREATE ACCOUNT */}
-        <section className={`tab-panel ${tab === "create" ? "active" : ""}`} role="tabpanel">
+        <section className={`tab-panel ${tab === "create" ? "active" : ""}`}>
           <form onSubmit={onCreateAccount}>
             <div className="form-grid">
               <div className="form-group">
-                <label htmlFor="full-name">Full name</label>
+                <label>Full name</label>
                 <input
-                  id="full-name"
-                  name="fullName"
                   type="text"
                   className="input"
-                  autoComplete="name"
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -290,13 +262,10 @@ export function Login() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="create-email">Email</label>
+                <label>Email</label>
                 <input
-                  id="create-email"
-                  name="email"
                   type="email"
                   className="input"
-                  autoComplete="email"
                   required
                   value={createEmail}
                   onChange={(e) => setCreateEmail(e.target.value)}
@@ -304,13 +273,10 @@ export function Login() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="create-password">Password</label>
+                <label>Password</label>
                 <input
-                  id="create-password"
-                  name="password"
                   type="password"
                   className="input"
-                  autoComplete="new-password"
                   required
                   value={createPassword}
                   onChange={(e) => setCreatePassword(e.target.value)}
@@ -318,24 +284,20 @@ export function Login() {
 
                 <div className="strength-wrapper">
                   <div className="strength-meter">
-                    <div className={`strength-bar ${strength.tone}`} style={{ width: strength.width }} />
+                    <div
+                      className={`strength-bar ${strength.tone}`}
+                      style={{ width: strength.width }}
+                    />
                   </div>
                   <div className="strength-text">{strength.label}</div>
-                </div>
-
-                <div className="helper-text">
-                  Use at least 8 characters, including upper &amp; lower case, numbers and a symbol.
                 </div>
               </div>
 
               <div className="form-group">
-                <label htmlFor="confirm-password">Confirm password</label>
+                <label>Confirm password</label>
                 <input
-                  id="confirm-password"
-                  name="confirmPassword"
                   type="password"
                   className="input"
-                  autoComplete="new-password"
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -343,25 +305,22 @@ export function Login() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="account-type">Account type</label>
-                <select
-                  id="account-type"
-                  name="accountType"
-                  value={accountType}
-                  onChange={(e) => setAccountType(e.target.value)}
-                >
+                <label>Account type</label>
+                <select value={accountType} onChange={(e) => setAccountType(e.target.value)}>
                   <option value="business">Business (multiple users)</option>
                   <option value="single_user">Single user</option>
                 </select>
               </div>
             </div>
 
-            <button className="primary-btn" type="submit" disabled={busyCreate}>
+            <button className="primary-btn" disabled={busyCreate}>
               {busyCreate ? "Creating..." : "Create account"}
             </button>
           </form>
 
-          <div className="footnote">The first user for an account is always created as an Administrator.</div>
+          <div className="footnote">
+            The first user for an account is always created as an Administrator.
+          </div>
         </section>
       </div>
     </div>
