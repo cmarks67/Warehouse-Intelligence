@@ -386,37 +386,50 @@ export function UsersPage() {
       </Card>
 
       {isBusinessDerived && isAdmin && (
-        <Card
-          title="Invite a user"
-          subtitle="The user will receive an email invitation and set their own password."
+  <Card
+    title="Invite a user"
+    subtitle="The user will receive an email invitation and set their own password."
+  >
+    <form onSubmit={createUser} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
+      <div>
+        <label className="wi-label">Full name</label>
+        <input
+          className="wi-input"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          required
+        />
+      </div>
+
+      <div>
+        <label className="wi-label">Email</label>
+        <input
+          className="wi-input"
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          required
+        />
+      </div>
+
+      <div className="wi-muted" style={{ fontSize: "0.85rem" }}>
+        An invitation email will be sent. The user will set their own password.
+      </div>
+
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy}
+          type="submit"
+          onClick={createUser}
         >
-          <form
-            onSubmit={createUser}
-            style={{ display: "grid", gap: 10, maxWidth: 520 }}
-          >
-            <input
-              className="wi-input"
-              placeholder="Full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
+          Send invite
+        </Button>
+      </div>
+    </form>
+  </Card>
+)}
 
-            <input
-              className="wi-input"
-              type="email"
-              placeholder="Email address"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              required
-            />
-
-            <Button type="submit" disabled={busy}>
-              Send invite
-            </Button>
-          </form>
-        </Card>
-      )}
     </AppLayout>
   );
 }
