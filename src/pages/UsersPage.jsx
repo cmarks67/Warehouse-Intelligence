@@ -1,3 +1,4 @@
+// /src/pages/UsersPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -22,6 +23,28 @@ function shortAccountId(raw) {
   return "WI-" + String(raw).slice(0, 8).toUpperCase();
 }
 
+function extractSupabaseFnError(err) {
+  // Supabase Functions errors can be: FunctionsFetchError, FunctionsHttpError, FunctionsRelayError, etc.
+  // Some include err.context with status/body.
+  const out = {
+    name: err?.name || "",
+    message: err?.message || String(err),
+    status: err?.context?.status,
+    body: err?.context?.body,
+  };
+
+  // If body is a stringified JSON, try to parse for readability
+  if (typeof out.body === "string") {
+    try {
+      out.body = JSON.parse(out.body);
+    } catch {
+      // leave as-is
+    }
+  }
+
+  return out;
+}
+
 /* ---------- page ---------- */
 
 export function UsersPage() {
@@ -43,13 +66,9 @@ export function UsersPage() {
   const isAdmin = profile?.role === "admin";
 
   // ✅ Source of truth: account_type, with fallback for legacy data
-  const isBusinessDerived =
-    profile?.account_type === "business" || userCount > 1;
+  const isBusinessDerived = profile?.account_type === "business" || userCount > 1;
 
-  const accountIdDisplay = useMemo(
-    () => shortAccountId(profile?.account_id),
-    [profile]
-  );
+  const accountIdDisplay = useMemo(() => shortAccountId(profile?.account_id), [profile]);
 
   /* ---------- navigation ---------- */
 
@@ -94,31 +113,21 @@ export function UsersPage() {
 
     setHeaderEmail(authUser.email || "");
 
-    const { data: p, error: pe } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", authUser.id)
-      .single();
+    const { data: p, error: pe } = await supabase.from("users").select("*").eq("id", authUser.id).single();
 
     if (pe || !p) {
       const fallback = {
         id: authUser.id,
         email: authUser.email,
-        full_name:
-          authUser.user_metadata?.full_name || authUser.email,
+        full_name: authUser.user_metadata?.full_name || authUser.email,
         role: "admin",
-        account_type:
-          authUser.user_metadata?.account_type === "business"
-            ? "business"
-            : "single_user",
+        account_type: authUser.user_metadata?.account_type === "business" ? "business" : "single_user",
         account_id: authUser.id,
         business_owner_id: authUser.id,
         is_active: true,
       };
 
-      const { error: ue } = await supabase
-        .from("users")
-        .upsert(fallback);
+      const { error: ue } = await supabase.from("users").upsert(fallback);
 
       if (ue) {
         setMsg({
@@ -158,11 +167,9 @@ export function UsersPage() {
     setBusy(true);
     setMsg({ type: "", text: "" });
     try {
-      const { error } =
-        await supabase.auth.resetPasswordForEmail(targetEmail, {
-          redirectTo:
-            "https://warehouseintelligence.co.uk/password-reset.html",
-        });
+      const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: "https://warehouseintelligence.co.uk/password-reset.html",
+      });
       if (error) throw error;
 
       setMsg({
@@ -184,10 +191,7 @@ export function UsersPage() {
     setBusy(true);
     setMsg({ type: "", text: "" });
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({ role: "admin" })
-        .eq("id", userId);
+      const { error } = await supabase.from("users").update({ role: "admin" }).eq("id", userId);
       if (error) throw error;
 
       await loadUsersByAccount(profile.account_id);
@@ -206,10 +210,7 @@ export function UsersPage() {
     setBusy(true);
     setMsg({ type: "", text: "" });
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({ is_active: false })
-        .eq("id", userId);
+      const { error } = await supabase.from("users").update({ is_active: false }).eq("id", userId);
       if (error) throw error;
 
       await loadUsersByAccount(profile.account_id);
@@ -229,8 +230,8 @@ export function UsersPage() {
     e.preventDefault();
     setMsg({ type: "", text: "" });
 
-    const email = newEmail.trim().toLowerCase();
-    const name = fullName.trim();
+    const email = (newEmail || "").trim().toLowerCase();
+    const name = (fullName || "").trim();
 
     if (!email || !email.includes("@")) {
       setMsg({
@@ -255,10 +256,15 @@ export function UsersPage() {
 
     setBusy(true);
     try {
-      const { data, error } =
-        await supabase.functions.invoke("invite-user", {
-          body: { email, full_name: name },
-        });
+      // ✅ Diagnostics (does not change behaviour)
+      const sbUrl = supabase?.supabaseUrl;
+      const fnUrl = sbUrl ? `${sbUrl}/functions/v1/invite-user` : "(unknown)";
+      console.log("SUPABASE_URL =", sbUrl);
+      console.log("EDGE_FN_URL  =", fnUrl);
+
+      const { data, error } = await supabase.functions.invoke("invite-user", {
+        body: { email, full_name: name },
+      });
 
       if (error) throw error;
       if (!data?.ok) throw new Error("Invite failed.");
@@ -267,14 +273,25 @@ export function UsersPage() {
         type: "success",
         text: `Invite sent to ${email}.`,
       });
+
       setFullName("");
       setNewEmail("");
 
       await loadUsersByAccount(profile.account_id);
-    } catch (e) {
+    } catch (e2) {
+      console.error("Invite error (raw):", e2);
+
+      const info = extractSupabaseFnError(e2);
+      console.error("Invite error (parsed):", info);
+
+      // Show a more actionable message in the UI
+      let ui = info.message || "Invite failed.";
+      if (info.status) ui += ` (HTTP ${info.status})`;
+      if (info.body) ui += ` | ${typeof info.body === "string" ? info.body : JSON.stringify(info.body)}`;
+
       setMsg({
         type: "error",
-        text: e?.message || "Invite failed.",
+        text: ui,
       });
     } finally {
       setBusy(false);
@@ -284,23 +301,13 @@ export function UsersPage() {
   /* ---------- render ---------- */
 
   return (
-    <AppLayout
-      headerEmail={headerEmail}
-      activeNav="users"
-      onSelectNav={onSelectNav}
-    >
+    <AppLayout headerEmail={headerEmail} activeNav="users" onSelectNav={onSelectNav}>
       <Card title="Account">
         <div className="wi-muted">{profile?.full_name || ""}</div>
 
         <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
-          <span className={`wi-badge ${isAdmin ? "admin" : "standard"}`}>
-            {isAdmin ? "Admin" : "Standard"}
-          </span>
-          <span
-            className={`wi-badge ${
-              isBusinessDerived ? "business" : "single_user"
-            }`}
-          >
+          <span className={`wi-badge ${isAdmin ? "admin" : "standard"}`}>{isAdmin ? "Admin" : "Standard"}</span>
+          <span className={`wi-badge ${isBusinessDerived ? "business" : "single_user"}`}>
             {isBusinessDerived ? "Business" : "Single user"}
           </span>
         </div>
@@ -312,21 +319,10 @@ export function UsersPage() {
 
       <Card
         title="Users"
-        subtitle={
-          isBusinessDerived
-            ? "Manage users under this business account."
-            : "This is a single-user account."
-        }
+        subtitle={isBusinessDerived ? "Manage users under this business account." : "This is a single-user account."}
       >
         {msg.text && (
-          <div
-            style={{
-              marginBottom: 10,
-              color: msg.type === "error" ? "#b91c1c" : "#166534",
-            }}
-          >
-            {msg.text}
-          </div>
+          <div style={{ marginBottom: 10, color: msg.type === "error" ? "#b91c1c" : "#166534" }}>{msg.text}</div>
         )}
 
         <table className="wi-table">
@@ -353,24 +349,15 @@ export function UsersPage() {
                   <td>
                     {canManage ? (
                       <>
-                        <Button
-                          variant="secondary"
-                          onClick={() => adminResetEmail(u.email)}
-                        >
+                        <Button variant="secondary" onClick={() => adminResetEmail(u.email)} disabled={busy}>
                           Reset
                         </Button>
                         {u.role !== "admin" && (
-                          <Button
-                            variant="secondary"
-                            onClick={() => adminPromote(u.id)}
-                          >
+                          <Button variant="secondary" onClick={() => adminPromote(u.id)} disabled={busy}>
                             Promote
                           </Button>
                         )}
-                        <Button
-                          variant="danger"
-                          onClick={() => adminDeactivate(u.id)}
-                        >
+                        <Button variant="danger" onClick={() => adminDeactivate(u.id)} disabled={busy}>
                           Delete
                         </Button>
                       </>
@@ -386,50 +373,36 @@ export function UsersPage() {
       </Card>
 
       {isBusinessDerived && isAdmin && (
-  <Card
-    title="Invite a user"
-    subtitle="The user will receive an email invitation and set their own password."
-  >
-    <form onSubmit={createUser} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-      <div>
-        <label className="wi-label">Full name</label>
-        <input
-          className="wi-input"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-          required
-        />
-      </div>
+        <Card title="Invite a user" subtitle="The user will receive an email invitation and set their own password.">
+          <form onSubmit={createUser} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
+            <div>
+              <label className="wi-label">Full name</label>
+              <input className="wi-input" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+            </div>
 
-      <div>
-        <label className="wi-label">Email</label>
-        <input
-          className="wi-input"
-          type="email"
-          value={newEmail}
-          onChange={(e) => setNewEmail(e.target.value)}
-          required
-        />
-      </div>
+            <div>
+              <label className="wi-label">Email</label>
+              <input
+                className="wi-input"
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+              />
+            </div>
 
-      <div className="wi-muted" style={{ fontSize: "0.85rem" }}>
-        An invitation email will be sent. The user will set their own password.
-      </div>
+            <div className="wi-muted" style={{ fontSize: "0.85rem" }}>
+              An invitation email will be sent. The user will set their own password.
+            </div>
 
-      <div>
-        <Button
-          variant="primary"
-          disabled={busy}
-          type="submit"
-          onClick={createUser}
-        >
-          Send invite
-        </Button>
-      </div>
-    </form>
-  </Card>
-)}
-
+            <div>
+              <Button variant="primary" disabled={busy} type="submit">
+                {busy ? "Sending..." : "Send invite"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
     </AppLayout>
   );
 }
