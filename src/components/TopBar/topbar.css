@@ -11,11 +11,38 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-height: 56px;
+}
+
+.wi-brandRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wi-menuBtn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--wi-border);
+  background: #fff;
+  border-radius: 10px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--wi-text-main);
+}
+
+.wi-menuBtn:hover {
+  background: #f9fafb;
 }
 
 .wi-brand {
   font-size: 1.2rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .wi-brand span {
@@ -26,11 +53,16 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .wi-userinfo__email {
   font-size: 0.9rem;
   color: var(--wi-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48vw;
 }
 
 .wi-signout {
@@ -46,7 +78,7 @@
   background: #f9fafb;
 }
 
-/* --- NEW: stack email + account id --- */
+/* stack email + account id */
 .wi-userinfo__details {
   display: flex;
   flex-direction: column;
@@ -54,7 +86,7 @@
   line-height: 1.2;
 }
 
-/* --- NEW: account id line --- */
+/* account id line */
 .wi-userinfo__account {
   font-size: 0.75rem;
   color: var(--wi-text-muted);
@@ -62,7 +94,7 @@
   position: relative;
 }
 
-/* --- NEW: tooltip --- */
+/* tooltip */
 .wi-userinfo__account::after {
   content: attr(data-full-id);
   position: absolute;
@@ -78,10 +110,23 @@
   pointer-events: none;
   transform: translateY(-4px);
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 1000;
+  z-index: 1001;
 }
 
 .wi-userinfo__account:hover::after {
   opacity: 1;
   transform: translateY(0);
+}
+
+@media (max-width: 900px) {
+  .wi-header__inner {
+    padding: 10px 12px;
+  }
+
+  /* keep header usable on phone */
+  .wi-userinfo__email {
+    max-width: 42vw;
+  }
+
+  /* optional: hide "Sign out" text if you prefer, but keeping as-is for now */
 }

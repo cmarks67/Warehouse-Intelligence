@@ -10,6 +10,8 @@ import { TopBar } from "../TopBar/TopBar";
 // IMPORTANT: use the SAME singleton client used by DashboardPage.jsx
 import supabase from "../../lib/supabaseClient";
 
+const MOBILE_BREAKPOINT_PX = 900;
+
 export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
   const navigate = useNavigate();
 
@@ -23,11 +25,52 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
     setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  // This is what allows the content to shift left when collapsed
+  // Sidebar collapsed (desktop reclaim space)
   const [navCollapsed, setNavCollapsed] = useState(false);
   const handleNavCollapsedChange = useCallback((isCollapsed) => {
     setNavCollapsed(!!isCollapsed);
   }, []);
+
+  // Mobile drawer open/close
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+    const onChange = (e) => setIsMobile(!!e.matches);
+
+    // init + subscribe
+    setIsMobile(mq.matches);
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+
+  // Close mobile drawer when leaving mobile breakpoint
+  useEffect(() => {
+    if (!isMobile) setMobileNavOpen(false);
+  }, [isMobile]);
+
+  // Lock body scroll when drawer open (prevents double-scroll/jank)
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (mobileNavOpen) document.body.classList.add("wi-body--navOpen");
+    else document.body.classList.remove("wi-body--navOpen");
+
+    return () => document.body.classList.remove("wi-body--navOpen");
+  }, [mobileNavOpen]);
+
+  const openMobileNav = useCallback(() => setMobileNavOpen(true), []);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
 
   // Header context
   const [resolvedEmail, setResolvedEmail] = useState(headerEmail || "");
@@ -39,7 +82,6 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
   }, [headerEmail]);
 
   const loadHeaderContext = useCallback(async () => {
-    // Use session so it works reliably on refresh (same as DashboardPage.jsx)
     const { data: sess, error: sessErr } = await supabase.auth.getSession();
     if (sessErr) throw sessErr;
 
@@ -76,7 +118,6 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
       }
     })();
 
-    // Keep header synced if auth changes
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!alive) return;
 
@@ -117,16 +158,41 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
     }
   };
 
+  // When a nav item is selected on mobile, close drawer to keep it feeling “app-like”
+  const handleSelectNav = useCallback(
+    (...args) => {
+      if (typeof onSelectNav === "function") onSelectNav(...args);
+      if (isMobile) closeMobileNav();
+    },
+    [onSelectNav, isMobile, closeMobileNav]
+  );
+
   return (
     <div className="wi-shell">
-      <TopBar email={resolvedEmail} accountId={accountId} onSignOut={onSignOut} />
+      <TopBar
+        email={resolvedEmail}
+        accountId={accountId}
+        onSignOut={onSignOut}
+        onMenuClick={isMobile ? (mobileNavOpen ? closeMobileNav : openMobileNav) : undefined}
+        menuOpen={isMobile ? mobileNavOpen : false}
+      />
+
+      {/* Mobile overlay */}
+      {isMobile && mobileNavOpen && <div className="wi-navOverlay" onClick={closeMobileNav} aria-hidden="true" />}
 
       <main className="wi-main">
-        <div className={`wi-layout ${navCollapsed ? "wi-layout--nav-collapsed" : ""}`}>
+        <div
+          className={[
+            "wi-layout",
+            navCollapsed ? "wi-layout--nav-collapsed" : "",
+            isMobile ? "wi-layout--mobile" : "",
+            isMobile && mobileNavOpen ? "wi-layout--mobileNavOpen" : "",
+          ].join(" ")}
+        >
           <aside className={`wi-sidebar ${navCollapsed ? "wi-sidebar--collapsed" : ""}`}>
             <SideNav
               active={activeNav}
-              onSelect={onSelectNav}
+              onSelect={handleSelectNav}
               sectionsOpen={sectionsOpen}
               onToggleSection={onToggleSection}
               onCollapsedChange={handleNavCollapsedChange}

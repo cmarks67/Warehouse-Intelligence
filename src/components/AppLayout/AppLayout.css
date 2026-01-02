@@ -14,6 +14,9 @@
   /* Some components reference these */
   --wi-text-muted: var(--wi-muted);
   --wi-text-main: var(--wi-text);
+
+  /* Layout tokens */
+  --wi-header-h: 56px;
 }
 
 .wi-shell {
@@ -61,18 +64,71 @@
   min-width: 0; /* prevents table/content overflow breaking layout */
 }
 
+/* Overlay for mobile drawer */
+.wi-navOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  z-index: 999;
+}
+
+/* Body scroll lock when drawer open */
+.wi-body--navOpen {
+  overflow: hidden;
+}
+
+/* ----- Mobile: off-canvas drawer, content stays primary ----- */
 @media (max-width: 900px) {
+  :root {
+    --wi-header-h: 56px;
+  }
+
+  .wi-main {
+    padding: 12px;
+  }
+
+  .wi-layout {
+    gap: 12px;
+  }
+
+  /* Mobile mode flag (set by AppLayout.jsx) */
+  .wi-layout.wi-layout--mobile {
+    position: relative;
+  }
+
+  /* Make sidebar a drawer */
+  .wi-layout.wi-layout--mobile .wi-sidebar {
+    position: fixed;
+    top: var(--wi-header-h);
+    left: 12px;
+    right: 12px;
+    width: auto; /* ignore --wi-sidebar-w on mobile */
+    max-width: 520px;
+    height: calc(100dvh - var(--wi-header-h) - 24px);
+    z-index: 1000;
+
+    /* drawer animation */
+    transform: translateY(-8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 140ms ease, opacity 140ms ease;
+  }
+
+  /* When open */
+  .wi-layout.wi-layout--mobile.wi-layout--mobileNavOpen .wi-sidebar {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Content should be full-width; no forced column stacking */
   .wi-layout {
     flex-direction: column;
   }
 
-  /* On mobile: sidebar always full-width */
+  /* On mobile we do NOT want collapse changing width semantics */
   .wi-layout,
   .wi-layout.wi-layout--nav-collapsed {
     --wi-sidebar-w: 100%;
-  }
-
-  .wi-sidebar {
-    width: 100%;
   }
 }
