@@ -1,3 +1,4 @@
+// /src/pages/PasswordPage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -10,7 +11,6 @@ import { supabase } from "../lib/supabaseClient";
  * Mirrors the old dashboard.html password section:
  * - change own password (auth.updateUser)
  * - admin "send reset email" uses auth.resetPasswordForEmail with redirectTo
- * Ref: dashboard.html :contentReference[oaicite:12]{index=12}
  */
 
 function shortAccountId(raw) {
@@ -34,6 +34,7 @@ export function PasswordPage() {
   const [adminMsg, setAdminMsg] = useState({ type: "", text: "" });
 
   const isAdmin = profile?.role === "admin";
+
   const accountIdDisplay = useMemo(
     () => shortAccountId(profile?.business_owner_id || profile?.id),
     [profile]
@@ -110,7 +111,7 @@ export function PasswordPage() {
 
     setBusy(true);
     try {
-      // Match old dashboard: direct resetPasswordForEmail with redirectTo :contentReference[oaicite:13]{index=13}
+      // IMPORTANT: HashRouter requires /#/reset-password
       const { error } = await supabase.auth.resetPasswordForEmail(target, {
         redirectTo: "https://www.warehouseintelligence.co.uk/#/reset-password",
       });
@@ -131,7 +132,6 @@ export function PasswordPage() {
 
   return (
     <AppLayout headerEmail={headerEmail} activeNav="password" onSelectNav={onSelectNav}>
-      {/* Account card (parity with old dashboard) :contentReference[oaicite:14]{index=14} */}
       <Card title="Account" subtitle="">
         <div className="wi-muted">{profile?.full_name || ""}</div>
         <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -170,42 +170,42 @@ export function PasswordPage() {
             <label style={{ fontSize: ".85rem" }}>Confirm new password</label>
             <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} required />
           </div>
-          <div>
-            <Button variant="primary" disabled={busy}>
-              Update password
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Updating..." : "Update password"}
             </Button>
           </div>
         </form>
-      </Card>
 
-      {/* Admin reset card (parity with old dashboard) :contentReference[oaicite:15]{index=15} */}
-      {isAdmin && (
-        <Card title="Admin: send a password reset email" subtitle="This sends a reset link to the email address.">
-          {adminMsg.text && (
-            <div style={{ marginBottom: 10, color: adminMsg.type === "error" ? "#b91c1c" : "#166534" }}>
-              {adminMsg.text}
-            </div>
-          )}
+        {isAdmin && (
+          <div style={{ marginTop: 20 }}>
+            <h3 style={{ marginTop: 0 }}>Admin: send password reset email</h3>
+            <p className="wi-muted">
+              Sends a reset link to a user. The link goes to the public reset password page.
+            </p>
 
-          <form onSubmit={adminSendReset} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-            <div>
-              <label style={{ fontSize: ".85rem" }}>User email</label>
+            {adminMsg.text && (
+              <div style={{ marginBottom: 10, color: adminMsg.type === "error" ? "#b91c1c" : "#166534" }}>
+                {adminMsg.text}
+              </div>
+            )}
+
+            <form onSubmit={adminSendReset} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <input
                 type="email"
-                placeholder="name@company.com"
                 value={adminEmail}
                 onChange={(e) => setAdminEmail(e.target.value)}
-                required
+                placeholder="user@email.com"
+                style={{ minWidth: 260 }}
               />
-            </div>
-            <div>
-              <Button variant="primary" disabled={busy}>
-                Send reset email
+              <Button type="submit" disabled={busy}>
+                {busy ? "Sending..." : "Send reset email"}
               </Button>
-            </div>
-          </form>
-        </Card>
-      )}
+            </form>
+          </div>
+        )}
+      </Card>
     </AppLayout>
   );
 }
