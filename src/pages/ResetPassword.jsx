@@ -23,9 +23,11 @@ export default function ResetPassword() {
     (async () => {
       clearAlerts();
 
-      // With HashRouter we normalize Supabase hash into:
+      // After normalisation we expect:
       //   #/reset-password?access_token=...&refresh_token=...&type=recovery
       const qs = new URLSearchParams(loc.search || "");
+      const access_token = qs.get("access_token");
+      const refresh_token = qs.get("refresh_token");
 
       // If Supabase returned an error payload, show it clearly.
       const err = qs.get("error") || qs.get("error_code");
@@ -35,19 +37,16 @@ export default function ResetPassword() {
         return;
       }
 
-      const access_token = qs.get("access_token");
-      const refresh_token = qs.get("refresh_token");
-
+      // If tokens exist, establish the recovery session.
       if (access_token && refresh_token) {
         const { error: sessErr } = await supabase.auth.setSession({ access_token, refresh_token });
         if (sessErr) {
           setError(`This password reset link is invalid or has expired. (${sessErr.message})`);
-          return;
         }
         return;
       }
 
-      // If there are no tokens, fall back to session check (covers navigation without link).
+      // Fallback: if user navigates here manually, verify a session exists.
       const { data } = await supabase.auth.getSession();
       if (!data?.session) {
         setError("This password reset link is invalid or has expired. Please request a new one.");
