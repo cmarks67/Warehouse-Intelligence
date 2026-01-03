@@ -21,3 +21,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 export default supabase;
 export { supabase };
+
+
+
+4
