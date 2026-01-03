@@ -145,7 +145,7 @@ export function Login() {
       return;
     }
 
-    // IMPORTANT: Redirect to site root so Supabase can append recovery tokens in the hash.
+    // Redirect to site root so Supabase can append recovery tokens in the hash.
     const redirectTo = window.location.origin;
 
     setBusyReset(true);
@@ -202,7 +202,6 @@ export function Login() {
           <div className={`auth-alert ${error ? "error" : "ok"}`}>{error || message}</div>
         )}
 
-        {/* SIGN IN */}
         <section className={`tab-panel ${tab === "signin" ? "active" : ""}`}>
           <form onSubmit={onSignIn}>
             <div className="form-grid">
@@ -247,7 +246,6 @@ export function Login() {
           </form>
         </section>
 
-        {/* CREATE ACCOUNT */}
         <section className={`tab-panel ${tab === "create" ? "active" : ""}`}>
           <form onSubmit={onCreateAccount}>
             <div className="form-grid">
