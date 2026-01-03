@@ -7,12 +7,6 @@ import { Card } from "../components/Card/Card";
 import { Button } from "../components/Button/Button";
 import { supabase } from "../lib/supabaseClient";
 
-/**
- * Mirrors the old dashboard.html password section:
- * - change own password (auth.updateUser)
- * - admin "send reset email" uses auth.resetPasswordForEmail with redirectTo
- */
-
 function shortAccountId(raw) {
   if (!raw) return "WI-UNKNOWN";
   return "WI-" + raw.slice(0, 8).toUpperCase();
@@ -111,9 +105,11 @@ export function PasswordPage() {
 
     setBusy(true);
     try {
-      // IMPORTANT: HashRouter requires /#/reset-password
+      // IMPORTANT for HashRouter:
+      // Supabase sends recovery tokens in the URL hash (#access_token=...).
+      // redirectTo must NOT be a hash route, otherwise the router and Supabase clash.
       const { error } = await supabase.auth.resetPasswordForEmail(target, {
-        redirectTo: "https://www.warehouseintelligence.co.uk/#/reset-password",
+        redirectTo: "https://warehouseintelligence.co.uk/",
       });
       if (error) throw error;
 

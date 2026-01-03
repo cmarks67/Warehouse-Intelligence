@@ -110,8 +110,7 @@ export function Login() {
       return;
     }
 
-    // ✅ FORCE CONFIRMATION REDIRECT TO PUBLIC HOME (HashRouter)
-    const emailRedirectTo = "https://www.warehouseintelligence.co.uk/#/";
+    const emailRedirectTo = "https://www.warehouseintelligence.co.uk/";
 
     setBusyCreate(true);
     const { error } = await supabase.auth.signUp({
@@ -146,8 +145,8 @@ export function Login() {
       return;
     }
 
-    // HashRouter-compatible reset destination
-    const redirectTo = "https://www.warehouseintelligence.co.uk/#/reset-password";
+    // IMPORTANT: Redirect to site root so Supabase can append recovery tokens in the hash.
+    const redirectTo = window.location.origin;
 
     setBusyReset(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });

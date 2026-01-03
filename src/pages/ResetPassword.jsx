@@ -1,11 +1,12 @@
 // /src/pages/ResetPassword.jsx
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import "./login.css";
 
 export default function ResetPassword() {
   const nav = useNavigate();
+  const loc = useLocation();
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -19,12 +20,43 @@ export default function ResetPassword() {
   };
 
   useEffect(() => {
-    // If user lands here without a recovery session, show a clear message.
-    supabase.auth.getSession().then(({ data }) => {
+    (async () => {
+      clearAlerts();
+
+      // With HashRouter we normalize Supabase hash into:
+      //   #/reset-password?access_token=...&refresh_token=...&type=recovery
+      const qs = new URLSearchParams(loc.search || "");
+
+      // If Supabase returned an error payload, show it clearly.
+      const err = qs.get("error") || qs.get("error_code");
+      const errDesc = qs.get("error_description");
+      if (err) {
+        setError(errDesc ? `${err}: ${errDesc}` : err);
+        return;
+      }
+
+      const access_token = qs.get("access_token");
+      const refresh_token = qs.get("refresh_token");
+
+      if (access_token && refresh_token) {
+        const { error: sessErr } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (sessErr) {
+          setError(`This password reset link is invalid or has expired. (${sessErr.message})`);
+          return;
+        }
+        return;
+      }
+
+      // If there are no tokens, fall back to session check (covers navigation without link).
+      const { data } = await supabase.auth.getSession();
       if (!data?.session) {
         setError("This password reset link is invalid or has expired. Please request a new one.");
       }
+    })().catch((e) => {
+      console.error(e);
+      setError(e?.message || "Unable to validate reset link.");
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onReset = async (e) => {
