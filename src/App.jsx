@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./auth/ProtectedRoute";
 
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 
 // Pages
 import DashboardPage from "./pages/DashboardPage"; // default export in your repo
@@ -23,6 +24,7 @@ export default function App() {
       {/* Public */}
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Convenience redirects */}
       <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />

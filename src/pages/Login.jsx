@@ -1,3 +1,4 @@
+// /src/pages/Login.jsx
 import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -109,7 +110,7 @@ export function Login() {
       return;
     }
 
-    // ✅ FORCE CONFIRMATION REDIRECT TO PUBLIC HOME
+    // ✅ FORCE CONFIRMATION REDIRECT TO PUBLIC HOME (HashRouter)
     const emailRedirectTo = "https://www.warehouseintelligence.co.uk/#/";
 
     setBusyCreate(true);
@@ -145,7 +146,8 @@ export function Login() {
       return;
     }
 
-    const redirectTo = "https://www.warehouseintelligence.co.uk/#/login";
+    // HashRouter-compatible reset destination
+    const redirectTo = "https://www.warehouseintelligence.co.uk/#/reset-password";
 
     setBusyReset(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
@@ -284,10 +286,7 @@ export function Login() {
 
                 <div className="strength-wrapper">
                   <div className="strength-meter">
-                    <div
-                      className={`strength-bar ${strength.tone}`}
-                      style={{ width: strength.width }}
-                    />
+                    <div className={`strength-bar ${strength.tone}`} style={{ width: strength.width }} />
                   </div>
                   <div className="strength-text">{strength.label}</div>
                 </div>
@@ -318,9 +317,7 @@ export function Login() {
             </button>
           </form>
 
-          <div className="footnote">
-            The first user for an account is always created as an Administrator.
-          </div>
+          <div className="footnote">The first user for an account is always created as an Administrator.</div>
         </section>
       </div>
     </div>
