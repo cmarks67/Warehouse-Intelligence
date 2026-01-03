@@ -112,7 +112,7 @@ export function PasswordPage() {
     try {
       // Match old dashboard: direct resetPasswordForEmail with redirectTo :contentReference[oaicite:13]{index=13}
       const { error } = await supabase.auth.resetPasswordForEmail(target, {
-        redirectTo: "https://warehouseintelligence.co.uk/password-reset.html",
+        redirectTo: "https://www.warehouseintelligence.co.uk/#/reset-password",
       });
       if (error) throw error;
 
