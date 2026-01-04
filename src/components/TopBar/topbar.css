@@ -178,3 +178,10 @@
     display: inline;
   }
 }
+.wi-header {
+  height: var(--wi-header-h);
+}
+
+.wi-header__inner {
+  min-height: var(--wi-header-h);
+}

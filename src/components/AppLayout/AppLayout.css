@@ -47,11 +47,12 @@
 
 .wi-sidebar {
   width: var(--wi-sidebar-w);
+  flex: 0 0 var(--wi-sidebar-w);
   background: var(--wi-card);
   border: 1px solid var(--wi-border);
   border-radius: 12px;
   padding: 12px 10px;
-  transition: width 140ms ease, padding 140ms ease;
+  transition: width 140ms ease, flex-basis 140ms ease, padding 140ms ease;
   overflow: hidden; /* prevents inner nav forcing width */
 }
 
@@ -77,7 +78,7 @@
   overflow: hidden;
 }
 
-/* ----- Mobile: off-canvas drawer, content stays primary ----- */
+/* ----- Mobile: off-canvas drawer ----- */
 @media (max-width: 900px) {
   :root {
     --wi-header-h: 56px;
@@ -96,14 +97,34 @@
     position: relative;
   }
 
+  /* Content should be full-width; no forced column stacking */
+  .wi-layout {
+    flex-direction: column;
+  }
+
+  /*
+    Drawer behaviour on mobile:
+    - Expanded: wider drawer
+    - Collapsed: narrow rail (actually reduces size)
+  */
+  .wi-layout.wi-layout--mobile {
+    --wi-mobile-drawer-w: min(520px, calc(100vw - 24px));
+  }
+
+  .wi-layout.wi-layout--mobile.wi-layout--nav-collapsed {
+    --wi-mobile-drawer-w: 64px;
+  }
+
   /* Make sidebar a drawer */
   .wi-layout.wi-layout--mobile .wi-sidebar {
     position: fixed;
     top: var(--wi-header-h);
     left: 12px;
-    right: 12px;
-    width: auto; /* ignore --wi-sidebar-w on mobile */
-    max-width: 520px;
+    right: auto;
+
+    width: var(--wi-mobile-drawer-w);
+    flex: 0 0 auto;
+
     height: calc(100dvh - var(--wi-header-h) - 24px);
     z-index: 1000;
 
@@ -111,7 +132,14 @@
     transform: translateY(-8px);
     opacity: 0;
     pointer-events: none;
-    transition: transform 140ms ease, opacity 140ms ease;
+    transition:
+      transform 140ms ease,
+      opacity 140ms ease,
+      width 140ms ease;
+
+    /* allow reaching top items reliably */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* When open */
@@ -119,16 +147,5 @@
     transform: translateY(0);
     opacity: 1;
     pointer-events: auto;
-  }
-
-  /* Content should be full-width; no forced column stacking */
-  .wi-layout {
-    flex-direction: column;
-  }
-
-  /* On mobile we do NOT want collapse changing width semantics */
-  .wi-layout,
-  .wi-layout.wi-layout--nav-collapsed {
-    --wi-sidebar-w: 100%;
   }
 }
