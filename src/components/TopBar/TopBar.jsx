@@ -44,8 +44,15 @@ export function TopBar({ email, accountId, onSignOut, onMenuClick, menuOpen }) {
             </button>
           )}
 
-          <div className="wi-brand">
-            Warehouse <span>Intelligence</span>
+          <div className="wi-brand" aria-label="Warehouse Intelligence">
+            <span className="wi-brand__full">
+              Warehouse <span>Intelligence</span>
+            </span>
+
+            <span className="wi-brand__compact" aria-hidden="true">
+              <span className="wi-brand__compactW">W</span>
+              <span className="wi-brand__compactI">I</span>
+            </span>
           </div>
         </div>
 

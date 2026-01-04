@@ -1,6 +1,11 @@
 .wi-header {
   background: var(--wi-card);
   border-bottom: 1px solid var(--wi-border);
+
+  /* Keep TopBar permanently visible while scrolling */
+  position: sticky;
+  top: 0;
+  z-index: 1100;
 }
 
 .wi-header__inner {
@@ -33,6 +38,7 @@
   justify-content: center;
   cursor: pointer;
   color: var(--wi-text-main);
+  flex: 0 0 auto;
 }
 
 .wi-menuBtn:hover {
@@ -43,9 +49,28 @@
   font-size: 1.2rem;
   font-weight: 700;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .wi-brand span {
+  color: var(--wi-primary);
+}
+
+/* Full vs compact brand text */
+.wi-brand__full {
+  display: inline;
+}
+
+.wi-brand__compact {
+  display: none;
+  letter-spacing: 0.5px;
+}
+
+.wi-brand__compactW {
+  color: var(--wi-text-main);
+}
+
+.wi-brand__compactI {
   color: var(--wi-primary);
 }
 
@@ -72,6 +97,7 @@
   background: #fff;
   cursor: pointer;
   font-size: 0.85rem;
+  flex: 0 0 auto;
 }
 
 .wi-signout:hover {
@@ -84,6 +110,7 @@
   flex-direction: column;
   align-items: flex-end;
   line-height: 1.2;
+  min-width: 0;
 }
 
 /* account id line */
@@ -110,7 +137,7 @@
   pointer-events: none;
   transform: translateY(-4px);
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 1001;
+  z-index: 1200;
 }
 
 .wi-userinfo__account:hover::after {
@@ -123,10 +150,31 @@
     padding: 10px 12px;
   }
 
-  /* keep header usable on phone */
-  .wi-userinfo__email {
-    max-width: 42vw;
+  /* Prevent overlap: allow header content to wrap cleanly */
+  .wi-header__inner {
+    flex-wrap: wrap;
+    row-gap: 8px;
   }
 
-  /* optional: hide "Sign out" text if you prefer, but keeping as-is for now */
+  .wi-userinfo {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .wi-userinfo__details {
+    align-items: flex-start;
+  }
+
+  .wi-userinfo__email {
+    max-width: 65vw;
+  }
+
+  /* Switch brand to compact "WI" on mobile */
+  .wi-brand__full {
+    display: none;
+  }
+
+  .wi-brand__compact {
+    display: inline;
+  }
 }
