@@ -196,7 +196,7 @@ const NAV = {
     },
     {
       key: "mhe-training",
-      label: "MHE training",
+      label: "MHE training records",
       icon: Icons.training,
       to: "/app/setup/mhe-training",
       paths: ["/app/setup/mhe-training", "/app/mhe-training", "/app/tools/mhe-training", "/app/setup/mhe-training/"],

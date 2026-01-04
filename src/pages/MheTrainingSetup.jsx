@@ -1,6 +1,7 @@
 // /src/pages/MheTrainingSetup.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 
 import { AppLayout } from "../components/AppLayout/AppLayout";
 import { Card } from "../components/Card/Card";
@@ -156,6 +157,53 @@ export default function MheTrainingSetup() {
     certificatePath: "",
   });
 
+  // Actions dropdown (PORTAL: renders to body, fixed positioned)
+  const [actionsMenu, setActionsMenu] = useState({
+    open: false,
+    authId: "",
+    left: 0,
+    top: 0,
+  });
+  const [dueEdit, setDueEdit] = useState({ authId: "", value: "" });
+  const actionsMenuRef = useRef(null);
+
+  // Close portal menu on outside click, escape, scroll, resize
+  useEffect(() => {
+    const onDown = (e) => {
+      if (!actionsMenu.open) return;
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target)) {
+        setActionsMenu({ open: false, authId: "", left: 0, top: 0 });
+        setDueEdit({ authId: "", value: "" });
+      }
+    };
+
+    const onKey = (e) => {
+      if (!actionsMenu.open) return;
+      if (e.key === "Escape") {
+        setActionsMenu({ open: false, authId: "", left: 0, top: 0 });
+        setDueEdit({ authId: "", value: "" });
+      }
+    };
+
+    const onScrollOrResize = () => {
+      if (!actionsMenu.open) return;
+      setActionsMenu({ open: false, authId: "", left: 0, top: 0 });
+      setDueEdit({ authId: "", value: "" });
+    };
+
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize, true);
+
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize, true);
+    };
+  }, [actionsMenu.open]);
+
   const siteName = useMemo(() => sites.find((s) => s.id === siteId)?.name || "", [sites, siteId]);
 
   const mheTypeNameById = useMemo(() => {
@@ -188,6 +236,67 @@ export default function MheTrainingSetup() {
     }
     return "";
   }, []);
+
+  // -----------------------------
+  // Certificate view/download (private bucket via signed URL)
+  // -----------------------------
+  const CERT_BUCKET = "mhe-certificates";
+
+  const fileNameFromPath = (p) => {
+    if (!p) return "certificate";
+    const last = String(p).split("/").pop() || "certificate";
+    // strip the timestamp prefix you add: 169..._filename.pdf
+    const idx = last.indexOf("_");
+    return idx > 0 ? last.slice(idx + 1) : last;
+  };
+
+  const getSignedCertUrl = useCallback(async (path, expiresIn = 300) => {
+    if (!path) throw new Error("No certificate path found.");
+    const { data, error } = await supabase.storage.from(CERT_BUCKET).createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    if (!data?.signedUrl) throw new Error("Could not generate certificate URL.");
+    return data.signedUrl;
+  }, []);
+
+  const viewCertificate = useCallback(
+    async (path) => {
+      try {
+        setNotice({ type: "", message: "" });
+        const url = await getSignedCertUrl(path, 300);
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Failed to open certificate." });
+      }
+    },
+    [getSignedCertUrl]
+  );
+
+  const downloadCertificate = useCallback(
+    async (path) => {
+      try {
+        setNotice({ type: "", message: "" });
+        const url = await getSignedCertUrl(path, 300);
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Failed to download certificate file.");
+
+        const blob = await res.blob();
+        const objUrl = window.URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = objUrl;
+        a.download = fileNameFromPath(path);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        window.URL.revokeObjectURL(objUrl);
+      } catch (e) {
+        setNotice({ type: "error", message: e?.message || "Failed to download certificate." });
+      }
+    },
+    [getSignedCertUrl]
+  );
 
   // Init session
   useEffect(() => {
@@ -370,8 +479,7 @@ export default function MheTrainingSetup() {
     // Current active authorisations (base table, with id + training_due)
     const { data: aRows, error: aErr } = await supabase
       .from("colleague_mhe_authorisations")
-     .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path")
-
+      .select("id, colleague_id, mhe_type_id, trained_on, expires_on, status, certificate_path")
       .eq("site_id", siteId)
       .eq("status", "ACTIVE")
       .order("trained_on", { ascending: false });
@@ -389,10 +497,10 @@ export default function MheTrainingSetup() {
     }
 
     useRows = useRows.map((r) => ({
-  ...r,
-  training_due: r.expires_on, // UI uses training_due label
-  mhe_type: localMap.get(r.mhe_type_id) || r.mhe_type_id,
-}));
+      ...r,
+      training_due: r.expires_on, // UI uses training_due label
+      mhe_type: localMap.get(r.mhe_type_id) || r.mhe_type_id,
+    }));
 
     setCurrentAuths(useRows);
 
@@ -455,12 +563,11 @@ export default function MheTrainingSetup() {
       }
 
       const rows =
-  (data || []).map((r) => ({
-    ...r,
-    training_due: r.expires_on,
-    mhe_type: mheTypeNameById.get(r.mhe_type_id) || r.mhe_type_id,
-  })) || [];
-
+        (data || []).map((r) => ({
+          ...r,
+          training_due: r.expires_on,
+          mhe_type: mheTypeNameById.get(r.mhe_type_id) || r.mhe_type_id,
+        })) || [];
 
       hoverCacheRef.current.set(colleagueId, rows);
       setHoverTip((h) => ({ ...h, loading: false, rows }));
@@ -616,8 +723,6 @@ export default function MheTrainingSetup() {
   };
 
   // ---- Add training (NEW) ----
- 
-
   const openAddTraining = (colleagueIdArg = "") => {
     setNotice({ type: "", message: "" });
     setAddModal({
@@ -683,9 +788,8 @@ export default function MheTrainingSetup() {
       return setNotice({ type: "error", message: "Trained on date is required." });
     }
     if (!addModal.training_due || !isValidYMD(addModal.training_due)) {
-  return setNotice({ type: "error", message: "Training due date is required." });
-}
-
+      return setNotice({ type: "error", message: "Training due date is required." });
+    }
 
     setLoading(true);
     try {
@@ -722,8 +826,6 @@ export default function MheTrainingSetup() {
   };
 
   // ---- Retrain ----
-
-
   const openRetrain = (authRow) => {
     setNotice({ type: "", message: "" });
     setRetrainModal({
@@ -795,7 +897,7 @@ export default function MheTrainingSetup() {
 
     const { data, error } = await q;
     if (error) throw error;
-    setHistoryRows((data || []).map(r => ({ ...r, training_due: r.expires_on })));
+    setHistoryRows((data || []).map((r) => ({ ...r, training_due: r.expires_on })));
   }, [historyColleagueId, historyMheTypeId]);
 
   const submitRetrain = async () => {
@@ -818,7 +920,10 @@ export default function MheTrainingSetup() {
       const userId = authData?.user?.id || null;
 
       // revoke existing
-      const { error: revErr } = await supabase.from("colleague_mhe_authorisations").update({ status: "REVOKED" }).eq("id", a.id);
+      const { error: revErr } = await supabase
+        .from("colleague_mhe_authorisations")
+        .update({ status: "REVOKED" })
+        .eq("id", a.id);
       if (revErr) throw revErr;
 
       // insert new ACTIVE
@@ -862,6 +967,38 @@ export default function MheTrainingSetup() {
     })();
   }, [tab, refreshHistory]);
 
+  // Helper: open portal menu aligned to button (right edge)
+  const openActionsMenu = useCallback(
+    (authRow, buttonEl) => {
+      if (!authRow || !buttonEl) return;
+      const rect = buttonEl.getBoundingClientRect();
+      setNotice({ type: "", message: "" });
+      setDueEdit({ authId: authRow.id, value: authRow.training_due || "" });
+
+      setActionsMenu((prev) => {
+        const isSame = prev.open && prev.authId === authRow.id;
+        if (isSame) return { open: false, authId: "", left: 0, top: 0 };
+        return {
+          open: true,
+          authId: authRow.id,
+          left: rect.right,
+          top: rect.bottom + 8,
+        };
+      });
+    },
+    []
+  );
+
+  const closeActionsMenu = useCallback(() => {
+    setActionsMenu({ open: false, authId: "", left: 0, top: 0 });
+    setDueEdit({ authId: "", value: "" });
+  }, []);
+
+  const authForMenu = useMemo(() => {
+    if (!actionsMenu.open || !actionsMenu.authId) return null;
+    return (currentAuths || []).find((x) => x.id === actionsMenu.authId) || null;
+  }, [actionsMenu.open, actionsMenu.authId, currentAuths]);
+
   return (
     <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
       <div className="wi-page wi-mheTrainingPage">
@@ -904,18 +1041,44 @@ export default function MheTrainingSetup() {
         </div>
 
         <div className="wi-tabsRow">
-          <button className={`wi-tabPill ${tab === "register" ? "active" : ""}`} onClick={() => setTab("register")} type="button">
+          <button
+            className={`wi-tabPill ${tab === "register" ? "active" : ""}`}
+            onClick={() => setTab("register")}
+            type="button"
+          >
             Training register
           </button>
-          <button className={`wi-tabPill ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")} type="button">
+          <button
+            className={`wi-tabPill ${tab === "history" ? "active" : ""}`}
+            onClick={() => setTab("history")}
+            type="button"
+          >
             Audit history
           </button>
         </div>
 
         {/* Hidden file inputs */}
-        <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleUploadFile} />
-        <input ref={retrainFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleRetrainFile} />
-        <input ref={addFileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} onChange={handleAddFile} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png"
+          style={{ display: "none" }}
+          onChange={handleUploadFile}
+        />
+        <input
+          ref={retrainFileRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png"
+          style={{ display: "none" }}
+          onChange={handleRetrainFile}
+        />
+        <input
+          ref={addFileRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png"
+          style={{ display: "none" }}
+          onChange={handleAddFile}
+        />
 
         {tab === "register" && (
           <Card
@@ -956,12 +1119,23 @@ export default function MheTrainingSetup() {
 
               <div className="wi-field">
                 <label className="wi-label">Search colleague</label>
-                <input className="wi-input" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Name…" disabled={loading} />
+                <input
+                  className="wi-input"
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                  placeholder="Name…"
+                  disabled={loading}
+                />
               </div>
 
               <div className="wi-field">
                 <label className="wi-label">Filter MHE type</label>
-                <select className="wi-input" value={mheTypeFilter} onChange={(e) => setMheTypeFilter(e.target.value)} disabled={loading}>
+                <select
+                  className="wi-input"
+                  value={mheTypeFilter}
+                  onChange={(e) => setMheTypeFilter(e.target.value)}
+                  disabled={loading}
+                >
                   <option value="ALL">All types</option>
                   {mheTypes.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -980,7 +1154,6 @@ export default function MheTrainingSetup() {
                   <div
                     key={c.id}
                     className="wi-colleagueBlock is-dueSoon"
-                    // IMPORTANT FIX: hover triggers anywhere over the colleague block
                     onMouseEnter={(e) => moveHoverTip(e, c.id)}
                     onMouseMove={(e) => moveHoverTip(e, c.id)}
                     onMouseLeave={closeHoverTip}
@@ -994,9 +1167,6 @@ export default function MheTrainingSetup() {
                       <div className="wi-colleagueBadges">
                         <span className="wi-badge wi-badge--danger">Outstanding</span>
                         <span className="wi-badge">{c._auths.length} authorisation(s)</span>
-                        <Button variant="primary" onClick={() => openAddTraining(c.id)} disabled={loading}>
-                          Add training
-                        </Button>
                       </div>
                     </div>
 
@@ -1014,7 +1184,7 @@ export default function MheTrainingSetup() {
                               <th>Training due</th>
                               <th>Days</th>
                               <th>Certificate</th>
-                              <th style={{ width: 220 }}>Actions</th>
+                              <th style={{ width: 120 }}>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1023,36 +1193,61 @@ export default function MheTrainingSetup() {
                               const hasCert = !!a.certificate_path;
 
                               return (
-                                <tr key={a.id} className={!a.training_due || (d != null && d <= OUTSTANDING_DAYS) ? "wi-rowDueSoon" : ""}>
+                                <tr
+                                  key={a.id}
+                                  className={!a.training_due || (d != null && d <= OUTSTANDING_DAYS) ? "wi-rowDueSoon" : ""}
+                                >
                                   <td>{a.mhe_type}</td>
                                   <td>{a.trained_on}</td>
+                                  <td>{a.training_due || "—"}</td>
+                                  <td>{d == null ? "—" : d}</td>
 
                                   <td>
-                                    <input
-                                      className="wi-input"
-                                      type="date"
-                                      value={a.training_due || ""}
-                                      onChange={(e) => {
-                                        const v = e.target.value;
-                                        setCurrentAuths((prev) => (prev || []).map((x) => (x.id === a.id ? { ...x, training_due: v } : x)));
-                                      }}
-                                      // IMPORTANT FIX: onBlur persists to base table with real id
-                                      onBlur={(e) => updateTrainingDue(a.id, e.target.value)}
-                                      disabled={loading}
-                                    />
+                                    {hasCert ? (
+                                      <span className="wi-certHover">
+                                        <span className="wi-certYes">Yes</span>
+                                        <span className="wi-certPop">
+                                          <button
+                                            type="button"
+                                            className="wi-certPopLink"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              viewCertificate(a.certificate_path);
+                                            }}
+                                          >
+                                            View
+                                          </button>
+                                          <span className="wi-certSep">•</span>
+                                          <button
+                                            type="button"
+                                            className="wi-certPopLink"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              downloadCertificate(a.certificate_path);
+                                            }}
+                                          >
+                                            Download
+                                          </button>
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      "No"
+                                    )}
                                   </td>
 
-                                  <td>{d == null ? "—" : d}</td>
-                                  <td>{hasCert ? "Yes" : "No"}</td>
-
                                   <td>
-                                    <div className="wi-actionsRow">
-                                      <Button variant="primary" onClick={() => beginUpload(a)} disabled={loading}>
-                                        {hasCert ? "Replace cert" : "Upload cert"}
-                                      </Button>
-                                      <Button variant="primary" onClick={() => openRetrain(a)} disabled={loading}>
-                                        Retrain
-                                      </Button>
+                                    <div className="wi-actionsMenuWrap">
+                                      <button
+                                        type="button"
+                                        className="wi-actionsBtn"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openActionsMenu(a, e.currentTarget);
+                                        }}
+                                        disabled={loading}
+                                      >
+                                        Actions ▾
+                                      </button>
                                     </div>
                                   </td>
                                 </tr>
@@ -1069,7 +1264,6 @@ export default function MheTrainingSetup() {
 
             {hoverTip.open && hoverTip.colleagueId && (
               <div className="wi-floatTip" style={{ left: hoverTip.x, top: hoverTip.y, width: 520 }}>
-                {/* IMPORTANT FIX: show colleague name in title */}
                 <div className="wi-floatTip__title">
                   {colleagueNameById.get(hoverTip.colleagueId) || "Colleague"} – Training record (all)
                 </div>
@@ -1086,13 +1280,11 @@ export default function MheTrainingSetup() {
                         <div key={r.id} className="wi-floatTip__row">
                           <div className="t">
                             {r.mhe_type}{" "}
-                            <span style={{ fontWeight: 800, color: "#6b7280", marginLeft: 8 }}>
-                              ({r.status || "—"})
-                            </span>
+                            <span style={{ fontWeight: 800, color: "#6b7280", marginLeft: 8 }}>({r.status || "—"})</span>
                           </div>
                           <div className="d">
-                            Trained: <strong>{r.trained_on || "—"}</strong> • Due: <strong>{r.training_due || "—"}</strong> •{" "}
-                            {d == null ? "—" : `${d}d`} • Cert: <strong>{r.certificate_path ? "Yes" : "No"}</strong>
+                            Trained: <strong>{r.trained_on || "—"}</strong> • Due: <strong>{r.training_due || "—"}</strong>{" "}
+                            • {d == null ? "—" : `${d}d`} • Cert: <strong>{r.certificate_path ? "Yes" : "No"}</strong>
                           </div>
                         </div>
                       );
@@ -1109,7 +1301,12 @@ export default function MheTrainingSetup() {
             <div className="wi-formGrid">
               <div className="wi-field wi-span2">
                 <label className="wi-label">Colleague</label>
-                <select className="wi-input" value={historyColleagueId} onChange={(e) => setHistoryColleagueId(e.target.value)} disabled={loading}>
+                <select
+                  className="wi-input"
+                  value={historyColleagueId}
+                  onChange={(e) => setHistoryColleagueId(e.target.value)}
+                  disabled={loading}
+                >
                   <option value="">Select colleague…</option>
                   {siteColleagues.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -1121,7 +1318,12 @@ export default function MheTrainingSetup() {
 
               <div className="wi-field">
                 <label className="wi-label">Filter MHE type</label>
-                <select className="wi-input" value={historyMheTypeId} onChange={(e) => setHistoryMheTypeId(e.target.value)} disabled={loading}>
+                <select
+                  className="wi-input"
+                  value={historyMheTypeId}
+                  onChange={(e) => setHistoryMheTypeId(e.target.value)}
+                  disabled={loading}
+                >
                   <option value="ALL">All types</option>
                   {mheTypes.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -1163,6 +1365,8 @@ export default function MheTrainingSetup() {
                       {historyRows.map((r) => {
                         const typeName = mheTypeNameById.get(r.mhe_type_id) || r.mhe_type_id;
                         const dte = r.training_due ? daysUntil(r.training_due) : null;
+                        const hasCert = !!r.certificate_path;
+
                         return (
                           <tr key={r.id} className={r.status === "ACTIVE" ? "" : "wi-rowHistory"}>
                             <td>{typeName}</td>
@@ -1170,7 +1374,40 @@ export default function MheTrainingSetup() {
                             <td>{r.training_due || "—"}</td>
                             <td>{dte ?? "—"}</td>
                             <td>{r.status || "—"}</td>
-                            <td>{r.certificate_path ? "Yes" : "No"}</td>
+
+                            <td>
+                              {hasCert ? (
+                                <span className="wi-certHover">
+                                  <span className="wi-certYes">Yes</span>
+                                  <span className="wi-certPop">
+                                    <button
+                                      type="button"
+                                      className="wi-certPopLink"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        viewCertificate(r.certificate_path);
+                                      }}
+                                    >
+                                      View
+                                    </button>
+                                    <span className="wi-certSep">•</span>
+                                    <button
+                                      type="button"
+                                      className="wi-certPopLink"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        downloadCertificate(r.certificate_path);
+                                      }}
+                                    >
+                                      Download
+                                    </button>
+                                  </span>
+                                </span>
+                              ) : (
+                                "No"
+                              )}
+                            </td>
+
                             <td>{r.signed_off_at ? String(r.signed_off_at).replace("T", " ").slice(0, 19) : "—"}</td>
                             <td className="wi-cellNotes">{r.notes || "—"}</td>
                           </tr>
@@ -1268,7 +1505,12 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field wi-span2">
                     <label className="wi-label">Notes (optional)</label>
-                    <input className="wi-input" value={addModal.notes} onChange={(e) => setAddModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
+                    <input
+                      className="wi-input"
+                      value={addModal.notes}
+                      onChange={(e) => setAddModal((m) => ({ ...m, notes: e.target.value }))}
+                      disabled={loading}
+                    />
                   </div>
                 </div>
               </div>
@@ -1344,7 +1586,12 @@ export default function MheTrainingSetup() {
 
                   <div className="wi-field wi-span2">
                     <label className="wi-label">Notes (optional)</label>
-                    <input className="wi-input" value={retrainModal.notes} onChange={(e) => setRetrainModal((m) => ({ ...m, notes: e.target.value }))} disabled={loading} />
+                    <input
+                      className="wi-input"
+                      value={retrainModal.notes}
+                      onChange={(e) => setRetrainModal((m) => ({ ...m, notes: e.target.value }))}
+                      disabled={loading}
+                    />
                   </div>
                 </div>
               </div>
@@ -1360,6 +1607,85 @@ export default function MheTrainingSetup() {
             </div>
           </div>
         )}
+
+        {/* ACTIONS MENU PORTAL (overlays entire app) */}
+        {actionsMenu.open &&
+          authForMenu &&
+          createPortal(
+            <div
+              ref={actionsMenuRef}
+              className="wi-actionsMenu wi-actionsMenu--portal"
+              role="menu"
+              style={{
+                top: actionsMenu.top,
+                left: actionsMenu.left,
+                transform: "translateX(-100%)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="wi-actionsItem"
+                onClick={() => {
+                  closeActionsMenu();
+                  openAddTraining(authForMenu.colleague_id);
+                }}
+              >
+                Add training
+              </button>
+
+              <button
+                type="button"
+                className="wi-actionsItem"
+                onClick={() => {
+                  closeActionsMenu();
+                  beginUpload(authForMenu);
+                }}
+              >
+                {authForMenu.certificate_path ? "Replace certificate" : "Add certificate"}
+              </button>
+
+              <div className="wi-actionsDivider" />
+
+              <div className="wi-actionsSubTitle">Update training due date</div>
+              <div className="wi-actionsInline">
+                <input
+                  className="wi-actionsDate"
+                  type="date"
+                  value={dueEdit.authId === authForMenu.id ? dueEdit.value : authForMenu.training_due || ""}
+                  onChange={(e) => setDueEdit({ authId: authForMenu.id, value: e.target.value })}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  className="wi-actionsSave"
+                  onClick={() => {
+                    const v = dueEdit.authId === authForMenu.id ? dueEdit.value : authForMenu.training_due || "";
+                    updateTrainingDue(authForMenu.id, v);
+                    closeActionsMenu();
+                  }}
+                  disabled={loading}
+                >
+                  Save
+                </button>
+              </div>
+
+              <div className="wi-actionsDivider" />
+
+              <button
+                type="button"
+                className="wi-actionsItem"
+                onClick={() => {
+                  closeActionsMenu();
+                  openRetrain(authForMenu);
+                }}
+                disabled={loading}
+              >
+                Retrain
+              </button>
+            </div>,
+            document.body
+          )}
       </div>
     </AppLayout>
   );

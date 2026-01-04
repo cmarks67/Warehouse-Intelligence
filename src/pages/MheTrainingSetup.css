@@ -1,11 +1,16 @@
-/* /src/pages/MheTrainingSetup.css */
+/* ===============================
+   PAGE
+   =============================== */
 
 .wi-mheTrainingPage {
   max-width: 1650px;
   margin: 0 auto;
 }
 
-/* Tabs (same pattern used elsewhere) */
+/* ===============================
+   TABS
+   =============================== */
+
 .wi-tabsRow {
   display: flex;
   gap: 10px;
@@ -14,7 +19,7 @@
 }
 
 .wi-tabPill {
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid #e5e7eb;
   background: #fff;
   padding: 10px 14px;
   border-radius: 999px;
@@ -27,16 +32,10 @@
   border-color: rgba(37, 99, 235, 0.55);
 }
 
-/* Layout */
-.wi-mheRegisterGrid,
-.wi-mheHistoryGrid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 18px;
-  align-items: start;
-}
+/* ===============================
+   FORMS
+   =============================== */
 
-/* Forms */
 .wi-formGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -53,26 +52,27 @@
   grid-column: span 2;
 }
 
-.wi-uploadRow {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
+/* ===============================
+   REGISTER LIST
+   =============================== */
 
-/* Register list blocks */
 .wi-registerList {
   margin-top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
+/* allow overlays to escape */
 .wi-colleagueBlock {
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid #e5e7eb;
   border-radius: 16px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.7);
+
+  overflow: visible !important;
+  position: relative;
+  z-index: 1;
 }
 
 .wi-colleagueBlock.is-dueSoon {
@@ -84,21 +84,20 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 6px 4px 10px 4px;
-  cursor: default;
+  gap: 10px;
+  padding: 2px 4px 6px 4px;
 }
 
 .wi-colleagueName {
   font-weight: 800;
-  font-size: 1.02rem;
+  font-size: 0.98rem;
 }
 
 .wi-colleagueMeta {
   margin-left: 8px;
-  color: var(--text-muted, #6b7280);
+  color: #6b7280;
   font-weight: 700;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
 }
 
 .wi-colleagueBadges {
@@ -109,11 +108,11 @@
 }
 
 .wi-badge {
-  border: 1px solid var(--border, #e5e7eb);
+  border: 1px solid #e5e7eb;
   border-radius: 999px;
   padding: 4px 10px;
   font-weight: 800;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   background: #fff;
 }
 
@@ -123,11 +122,17 @@
   color: #b91c1c;
 }
 
-/* Tables */
+/* ===============================
+   TABLE
+   =============================== */
+
 .wi-tableWrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible !important;
   margin-top: 6px;
   max-height: 520px;
+  position: relative;
+  z-index: 10;
 }
 
 .wi-tableWrap--tall {
@@ -142,8 +147,8 @@
 .wi-table th,
 .wi-table td {
   text-align: left;
-  padding: 8px 6px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 6px 6px;
+  border-bottom: 1px solid #e5e7eb;
   vertical-align: top;
 }
 
@@ -152,58 +157,153 @@
   font-weight: 700;
 }
 
-.wi-actionsRow {
+/* ===============================
+   CERTIFICATE (HOVER)
+   =============================== */
+
+.wi-certHover {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wi-certYes {
+  font-weight: 800;
+}
+
+.wi-certPop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+
+  z-index: 99999;
+}
+
+.wi-certHover:hover .wi-certPop {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.wi-certPopLink {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.wi-certSep {
+  opacity: 0.6;
+  margin: 0 6px;
+}
+
+/* ===============================
+   ACTIONS
+   =============================== */
+
+.wi-actionsMenuWrap {
+  position: relative;
+  display: inline-block;
+}
+
+.wi-actionsBtn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Base menu styling (used by portal too) */
+.wi-actionsMenu {
+  width: 260px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  z-index: 100000;
+}
+
+/* KEY: portal overlay */
+.wi-actionsMenu--portal {
+  position: fixed;
+  z-index: 2147483647;
+}
+
+.wi-actionsItem {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 10px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.wi-actionsItem:hover {
+  background: rgba(17, 24, 39, 0.06);
+}
+
+.wi-actionsDivider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 8px 0;
+}
+
+.wi-actionsSubTitle {
+  font-weight: 900;
+  font-size: 0.85rem;
+  color: #6b7280;
+  padding: 0 10px 6px 10px;
+}
+
+.wi-actionsInline {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  padding: 0 10px 6px 10px;
+  align-items: center;
 }
 
-.wi-rowHistory {
-  opacity: 0.8;
+.wi-actionsDate {
+  flex: 1;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 10px;
 }
 
-.wi-cellNotes {
-  max-width: 420px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/* Floating tooltip */
-.wi-floatTip {
-  position: fixed;
-  z-index: 9999;
-  width: 420px;
-  max-width: 92vw;
-  padding: 12px 12px;
-  border: 1px solid var(--border, #e5e7eb);
+.wi-actionsSave {
+  border: 1px solid #e5e7eb;
   background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
-}
-
-.wi-floatTip__title {
+  padding: 8px 10px;
+  border-radius: 10px;
   font-weight: 900;
-  margin-bottom: 8px;
+  cursor: pointer;
 }
 
-.wi-floatTip__list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* ===============================
+   MODAL
+   =============================== */
 
-.wi-floatTip__row .t {
-  font-weight: 900;
-}
-
-.wi-floatTip__row .d {
-  font-size: 0.9rem;
-  color: var(--text-muted, #6b7280);
-  margin-top: 2px;
-}
-
-/* Modal */
 .wi-modalOverlay {
   position: fixed;
   inset: 0;
@@ -215,51 +315,9 @@
   padding: 16px;
 }
 
-.wi-modal {
-  width: min(780px, 96vw);
-  background: #fff;
-  border-radius: 18px;
-  border: 1px solid var(--border, #e5e7eb);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
-  overflow: hidden;
-}
-
-.wi-modalHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
-}
-
-.wi-modalTitle {
-  font-weight: 900;
-  font-size: 1.05rem;
-}
-
-.wi-modalClose {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid var(--border, #e5e7eb);
-  background: #fff;
-  font-size: 1.3rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.wi-modalBody {
-  padding: 16px;
-}
-
-.wi-modalFooter {
-  padding: 14px 16px;
-  border-top: 1px solid var(--border, #e5e7eb);
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
+/* ===============================
+   RESPONSIVE
+   =============================== */
 
 @media (max-width: 720px) {
   .wi-formGrid {
@@ -268,4 +326,53 @@
   .wi-span2 {
     grid-column: span 1;
   }
+}
+/* Modal panel must be opaque */
+.wi-modal {
+  width: min(720px, 100%);
+  background: #ffffff;              /* KEY */
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+/* Ensure content sections are also opaque */
+.wi-modalHeader,
+.wi-modalBody,
+.wi-modalFooter {
+  background: #ffffff;              /* KEY */
+}
+
+/* Optional: improve readability & spacing */
+.wi-modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.wi-modalBody {
+  padding: 16px;
+}
+
+.wi-modalFooter {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 14px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.wi-modalTitle {
+  font-weight: 900;
+}
+
+.wi-modalClose {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
 }

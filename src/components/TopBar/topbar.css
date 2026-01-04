@@ -2,12 +2,11 @@
   background: var(--wi-card);
   border-bottom: 1px solid var(--wi-border);
 
-  /* Keep TopBar permanently visible while scrolling */
+  /* Keep TopBar permanently visible */
   position: sticky;
   top: 0;
   z-index: 1100;
 
-  /* Constrain header height */
   height: var(--wi-header-h);
   overflow: hidden;
 }
@@ -23,12 +22,47 @@
   min-height: var(--wi-header-h);
 }
 
+/* ---------- Brand ---------- */
+
 .wi-brandRow {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
 }
+
+.wi-brand {
+  font-size: 1.2rem;
+  font-weight: 700;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--wi-text-main); /* W stays black */
+}
+
+/* Desktop logo */
+.wi-brand__full {
+  display: inline;
+}
+
+.wi-brand__full span {
+  color: var(--wi-primary); /* Intelligence in blue */
+}
+
+/* Mobile logo */
+.wi-brand__compact {
+  display: none;
+  letter-spacing: 0.5px;
+}
+
+.wi-brand__compactW {
+  color: var(--wi-text-main); /* W black */
+}
+
+.wi-brand__compactI {
+  color: var(--wi-primary); /* I blue */
+}
+
+/* ---------- Menu button ---------- */
 
 .wi-menuBtn {
   width: 38px;
@@ -49,39 +83,20 @@
   background: #f9fafb;
 }
 
-.wi-brand {
-  font-size: 1.2rem;
-  font-weight: 700;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.wi-brand span {
-  color: var(--wi-primary);
-}
-
-/* Full vs compact brand text */
-.wi-brand__full {
-  display: inline;
-}
-
-.wi-brand__compact {
-  display: none;
-  letter-spacing: 0.5px;
-}
-
-.wi-brand__compactW {
-  color: var(--wi-text-main);
-}
-
-.wi-brand__compactI {
-  color: var(--wi-primary);
-}
+/* ---------- User info ---------- */
 
 .wi-userinfo {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.wi-userinfo__details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
   min-width: 0;
 }
 
@@ -94,30 +109,6 @@
   max-width: 48vw;
 }
 
-.wi-signout {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--wi-border);
-  background: #fff;
-  cursor: pointer;
-  font-size: 0.85rem;
-  flex: 0 0 auto;
-}
-
-.wi-signout:hover {
-  background: #f9fafb;
-}
-
-/* stack email + account id */
-.wi-userinfo__details {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.2;
-  min-width: 0;
-}
-
-/* account id line */
 .wi-userinfo__account {
   font-size: 0.75rem;
   color: var(--wi-text-muted);
@@ -128,7 +119,7 @@
   text-overflow: ellipsis;
 }
 
-/* tooltip */
+/* Tooltip */
 .wi-userinfo__account::after {
   content: attr(data-full-id);
   position: absolute;
@@ -152,28 +143,39 @@
   transform: translateY(0);
 }
 
+.wi-signout {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wi-border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.wi-signout:hover {
+  background: #f9fafb;
+}
+
+/* ---------- Mobile ---------- */
+
 @media (max-width: 900px) {
-  /* Keep header single-row to prevent spill below fixed header height */
   .wi-header__inner {
     padding: 10px 12px;
     flex-wrap: nowrap;
   }
 
-  /* Ensure left + right sections can shrink without wrapping */
   .wi-brandRow {
-    min-width: 0;
     flex: 1 1 auto;
+    min-width: 0;
   }
 
   .wi-userinfo {
-    min-width: 0;
     flex: 0 1 auto;
     gap: 8px;
   }
 
-  /* Truncate text aggressively on small screens */
   .wi-userinfo__details {
-    min-width: 0;
     max-width: 52vw;
   }
 
@@ -181,7 +183,7 @@
     max-width: 100%;
   }
 
-  /* Switch brand to compact "WI" on mobile */
+  /* Switch to compact WI logo */
   .wi-brand__full {
     display: none;
   }
