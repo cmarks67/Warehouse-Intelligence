@@ -146,9 +146,56 @@
 }
 
 @media (max-width: 900px) {
+  /* Keep header single-row to prevent spill below the fixed header height */
   .wi-header__inner {
     padding: 10px 12px;
+    flex-wrap: nowrap;
+    row-gap: 0;
+    min-height: var(--wi-header-h);
   }
+
+  /* Ensure left + right sections can shrink without wrapping */
+  .wi-brandRow {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .wi-userinfo {
+    min-width: 0;
+    flex: 0 1 auto;
+    gap: 8px;
+  }
+
+  /* Truncate text aggressively on small screens */
+  .wi-userinfo__details {
+    min-width: 0;
+    max-width: 52vw;
+  }
+
+  .wi-userinfo__email {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wi-userinfo__account {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Switch brand to compact "WI" on mobile */
+  .wi-brand__full {
+    display: none;
+  }
+
+  .wi-brand__compact {
+    display: inline;
+  }
+}
+
 
   /* Prevent overlap: allow header content to wrap cleanly */
   .wi-header__inner {
