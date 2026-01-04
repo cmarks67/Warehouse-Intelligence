@@ -49,6 +49,12 @@ export function Login() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [accountType, setAccountType] = useState("business");
 
+  const goToHome = () => {
+    window.location.href = "https://www.warehouseintelligence.co.uk/";
+  };
+
+
+
   // Busy states
   const [busySignIn, setBusySignIn] = useState(false);
   const [busyCreate, setBusyCreate] = useState(false);
