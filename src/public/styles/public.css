@@ -180,9 +180,11 @@
 
 @media (min-width: 920px) {
   .pub-nav--desktop { display: flex; }
-  .pub-burger { display: none; }
-  .pub-drawer { display: none; }
+  /* Keep burger visible on desktop to match internal header */
+  .pub-burger { display: inline-flex; }
+  /* Drawer still only appears when open is true (React), so do not hide it here */
 }
+
 
 /* Pages */
 .pub-main {
