@@ -207,7 +207,29 @@
 
 .wi-sched-row {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr 0.5fr;
-  gap: 8px;
-  margin-bottom: 8px;
+  grid-template-columns: 1.6fr 0.9fr 0.7fr 0.7fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 900px) {
+  .wi-sched-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wi-sched-inlineInput {
+  width: 84px;
+  height: 34px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  font-size: 0.9rem;
+  margin-left: 6px;
+}
+
+.wi-sched-kpi--warning {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.06);
 }

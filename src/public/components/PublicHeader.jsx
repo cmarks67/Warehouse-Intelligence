@@ -35,11 +35,20 @@ export default function PublicHeader() {
           <span className="pub-burger__lines" />
         </button>
 
-        {/* Brand matches internal styling: Warehouse + Intelligence accent */}
         <Link className="pub-brand" to="/" aria-label="Warehouse Intelligence home">
-          <span className="pub-brand__word">Warehouse</span>{" "}
-          <span className="pub-brand__word pub-brand__accent">Intelligence</span>
-        </Link>
+  {/* Desktop/full */}
+  <span className="pub-brand__full">
+    <span className="pub-brand__word">Warehouse</span>{" "}
+    <span className="pub-brand__word pub-brand__accent">Intelligence</span>
+  </span>
+
+  {/* Mobile/compact: W black, I blue */}
+  <span className="pub-brand__compact" aria-hidden="true">
+    <span className="pub-brand__compactW">W</span>
+    <span className="pub-brand__compactI">I</span>
+  </span>
+</Link>
+
 
         {/* Right-side actions stay visible (even when desktop nav collapses) */}
         <div className="pub-actionsRight">

@@ -412,6 +412,27 @@
   color: var(--brand);
 }
 
+/* ---------- Public Brand: match internal behaviour ---------- */
+
+.pub-brand__full {
+  display: inline;
+}
+
+.pub-brand__compact {
+  display: none;
+  letter-spacing: 0.5px;
+  font-weight: 800;
+}
+
+.pub-brand__compactW {
+  color: var(--text);     /* W black */
+}
+
+.pub-brand__compactI {
+  color: var(--brand);    /* I blue */
+}
+
+
 /* Keep auth actions visible on all widths */
 .pub-actionsRight {
   margin-left: auto;
@@ -442,4 +463,10 @@
 /* Show full nav on wider screens; keep right actions visible regardless */
 @media (min-width: 920px) {
   .pub-nav--desktop { display: flex; }
+}
+
+/* Brand text utilities */
+.wi-brand-primary {
+  color: var(--brand); /* blue */
+  font-weight: 800;
 }

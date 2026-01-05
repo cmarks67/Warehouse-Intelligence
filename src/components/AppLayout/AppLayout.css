@@ -160,3 +160,26 @@
   flex: 1 0 auto;
 }
 
+/* =========================================================
+   TOP BAR / BURGER HEADER BRAND FIX
+   (Your header is NOT a <header> element)
+   ========================================================= */
+
+/* Catch ALL links inside the WI shell top area */
+.wi-shell a,
+.wi-shell a:visited {
+  color: var(--wi-text-main);
+  text-decoration: none;
+}
+
+/* Brand emphasis on hover only */
+.wi-shell a:hover {
+  color: var(--wi-primary);
+  text-decoration: none;
+}
+
+/* Hard stop: prevent any blue link bleed */
+.wi-shell a:active,
+.wi-shell a:focus {
+  color: var(--wi-text-main);
+}

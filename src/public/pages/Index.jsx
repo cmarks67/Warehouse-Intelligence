@@ -6,7 +6,9 @@ export default function PublicIndex() {
   return (
     <div className="pub-page">
       <section className="pub-hero">
-        <h1 className="pub-h1">Warehouse Intelligence</h1>
+      <h1 className="pub-h1">
+  Warehouse <span className="wi-brand-primary">Intelligence</span>
+</h1>
         <p className="pub-lead">
           Practical tooling for warehouse operations: compliance, scheduling, MHE training, and performance visibility—
           designed to work cleanly on mobile and desktop.

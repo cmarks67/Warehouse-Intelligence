@@ -1,5 +1,14 @@
 :root {
-  /* Use your tokens as the source of truth */
+  /* WI token fallbacks — ensures auth page never falls back to browser defaults */
+  --wi-bg: #f8fafc;
+  --wi-card: #ffffff;
+  --wi-border: #e5e7eb;
+  --wi-text-main: #0f172a;
+  --wi-text-muted: #64748b;
+  --wi-primary: #2563eb;
+  --wi-primary-hover: #1d4ed8;
+
+  /* Auth mappings */
   --auth-bg: var(--wi-bg);
   --auth-card-bg: var(--wi-card);
   --auth-card-border: var(--wi-border);
@@ -18,6 +27,10 @@
   --primary-btn: var(--wi-primary);
   --primary-btn-hover: var(--wi-primary-hover);
 }
+
+/* ========================================================= */
+/* AUTH LAYOUT */
+/* ========================================================= */
 
 .auth-shell {
   max-width: 640px;
@@ -38,6 +51,10 @@
   padding: 28px 32px 32px;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
 }
+
+/* ========================================================= */
+/* HEADER */
+/* ========================================================= */
 
 .auth-header {
   margin-bottom: 24px;
@@ -62,24 +79,40 @@
   color: var(--auth-muted);
 }
 
+/*
+  CRITICAL OVERRIDES:
+  Force the Back to home link to NOT be browser/global blue.
+  We beat global `a { color: ... !important; }` by:
+  - Increasing specificity (.auth-shell .auth-card ...)
+  - Setting all states
+  - Using !important
+*/
 .back-link {
   font-size: 0.8rem;
   text-align: right;
 }
 
-.back-link a {
-  color: var(--auth-focus);
-  text-decoration: none;
+/* neutral by default (matches your screenshot intent: not blue) */
+.auth-shell .auth-card .back-link a,
+.auth-shell .auth-card .back-link a:visited,
+.auth-shell .auth-card .back-link a:active,
+.auth-shell .auth-card .back-link a:focus {
+  color: var(--auth-muted) !important;
+  text-decoration: none !important;
 }
 
-.back-link a:hover {
-  text-decoration: underline;
+/* blue only on hover */
+.auth-shell .auth-card .back-link a:hover {
+  color: var(--auth-focus) !important;
+  text-decoration: underline !important;
 }
+
+/* ========================================================= */
+/* TAB TOGGLE */
+/* ========================================================= */
 
 .tab-toggle {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
   background: var(--pill-bg);
   border-radius: 999px;
   padding: 3px;
@@ -114,6 +147,10 @@
 .tab-panel.active {
   display: block;
 }
+
+/* ========================================================= */
+/* FORM */
+/* ========================================================= */
 
 .form-grid {
   display: grid;
@@ -178,25 +215,28 @@ select {
   white-space: nowrap;
 }
 
-/* Support BOTH: anchor links and the new button.linklike */
-.forgot-password a,
-.forgot-password .linklike {
-  color: var(--auth-focus);
-  text-decoration: none;
+/* Force forgot password link to follow the auth palette */
+.auth-shell .auth-card .forgot-password a,
+.auth-shell .auth-card .forgot-password a:visited,
+.auth-shell .auth-card .forgot-password a:active,
+.auth-shell .auth-card .forgot-password a:focus,
+.auth-shell .auth-card .forgot-password .linklike {
+  color: var(--auth-text) !important;   /* neutral like your screenshot */
+  text-decoration: none !important;
 }
 
-.forgot-password a:hover,
-.forgot-password .linklike:hover {
-  text-decoration: underline;
+.auth-shell .auth-card .forgot-password a:hover,
+.auth-shell .auth-card .forgot-password .linklike:hover {
+  color: var(--auth-focus) !important;  /* blue only on hover */
+  text-decoration: underline !important;
 }
 
-/* NEW: make a button look like a link (used for Forgot password?) */
+/* Button made to look like a link */
 .linklike {
   background: none;
   border: none;
   padding: 0;
   margin: 0;
-  color: inherit;
   cursor: pointer;
   font: inherit;
 }
@@ -206,6 +246,10 @@ select {
   cursor: default;
   text-decoration: none;
 }
+
+/* ========================================================= */
+/* PRIMARY BUTTON */
+/* ========================================================= */
 
 .primary-btn {
   margin-top: 16px;
@@ -239,11 +283,9 @@ select {
   box-shadow: none;
 }
 
-.footnote {
-  margin-top: 10px;
-  font-size: 0.78rem;
-  color: var(--auth-muted);
-}
+/* ========================================================= */
+/* ALERTS */
+/* ========================================================= */
 
 .auth-alert {
   margin: 0 0 14px;
@@ -265,46 +307,9 @@ select {
   color: #1e3a8a;
 }
 
-/* Strength meter */
-.strength-wrapper {
-  margin-top: 6px;
-}
-
-.strength-meter {
-  width: 100%;
-  height: 6px;
-  background: #e5e7eb;
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.strength-bar {
-  height: 100%;
-  width: 0%;
-  transition: width 0.25s ease, background-color 0.25s ease;
-}
-
-.strength-bar.none {
-  background: transparent;
-}
-.strength-bar.weak {
-  background: #dc2626;
-}
-.strength-bar.fair {
-  background: #eab308;
-}
-.strength-bar.good {
-  background: #22c55e;
-}
-.strength-bar.strong {
-  background: #16a34a;
-}
-
-.strength-text {
-  margin-top: 6px;
-  font-size: 0.78rem;
-  color: var(--auth-muted);
-}
+/* ========================================================= */
+/* MOBILE */
+/* ========================================================= */
 
 @media (max-width: 640px) {
   .auth-card {

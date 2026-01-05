@@ -10,7 +10,9 @@ export default function PublicFooter() {
     <footer className="pub-footer">
       <div className="pub-container pub-footer__inner">
         <div className="pub-footer__left">
-          <div className="pub-footer__brand">Warehouse Intelligence</div>
+          <div className="pub-footer__brand">
+  Warehouse <span className="wi-brand-primary">Intelligence</span>
+</div>
           <div className="pub-footer__small">
             Operational tools, compliance, and analytics for warehouse teams.
           </div>

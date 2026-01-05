@@ -11,10 +11,11 @@ import { supabase } from "../lib/supabaseClient";
 import "./SchedulingTool.css";
 
 /**
- * IMPORTANT:
- * - This page is intentionally built to behave like Users / Password pages:
- *   AppLayout controls header + sidebar + content spacing.
- * - We avoid redefining colours/tokens here. All branding comes from global CSS.
+ * Scheduling Tool (DB-backed)
+ * - Shift data is stored in Supabase table: public.scheduling_entries
+ * - Config (tasks/resources/rates/indirect limit) remains local for now
+ *   and is used to derive hours + costs on save.
+ * - Tasks are matched to DB rows by Task name (task_name).
  */
 
 function activeFromPath(pathname) {
@@ -57,7 +58,7 @@ function pathFromKey(key) {
 // Local storage (kept simple and safe)
 const LS_CFG_TASKS = "wi_sched_cfg_tasks_v1";
 const LS_CFG_MHE = "wi_sched_cfg_mhe_v1";
-const LS_DATA = "wi_sched_data_v1";
+const LS_CFG_INDIRECT_LIMIT = "wi_sched_cfg_indirect_limit_v1";
 
 function isoToday() {
   return new Date().toISOString().slice(0, 10);
@@ -89,11 +90,11 @@ function saveJson(key, value) {
 
 function defaultMhe() {
   return [
-    { id: uid(), label: "PPT fleet", type: "PPT", count: 4 },
-    { id: uid(), label: "CB fleet", type: "CB", count: 3 },
-    { id: uid(), label: "VNA trucks", type: "VNA", count: 2 },
-    { id: uid(), label: "Manual labour", type: "Manual", count: 10 },
-    { id: uid(), label: "Admin", type: "Admin", count: 2 },
+    { id: uid(), label: "PPT fleet", type: "PPT", count: 4, costPerHour: 18.0 },
+    { id: uid(), label: "CB fleet", type: "CB", count: 3, costPerHour: 18.0 },
+    { id: uid(), label: "VNA trucks", type: "VNA", count: 2, costPerHour: 18.0 },
+    { id: uid(), label: "Manual labour", type: "Manual", count: 10, costPerHour: 13.5 },
+    { id: uid(), label: "Admin", type: "Admin", count: 2, costPerHour: 14.0 },
   ];
 }
 function defaultTasks() {
@@ -134,15 +135,22 @@ export default function SchedulingTool() {
   // DB dropdown data (tenant-scoped)
   const [sites, setSites] = useState([]);
 
-  // Local config/data
+  // Local config
   const [cfgMhe, setCfgMhe] = useState(() => loadJson(LS_CFG_MHE, defaultMhe()));
   const [cfgTasks, setCfgTasks] = useState(() => loadJson(LS_CFG_TASKS, defaultTasks()));
-  const [dataStore, setDataStore] = useState(() => loadJson(LS_DATA, {}));
+  const [indirectLimitPct, setIndirectLimitPct] = useState(() => {
+    const v = Number(loadJson(LS_CFG_INDIRECT_LIMIT, 5));
+    return Number.isFinite(v) ? v : 5;
+  });
 
-  // Persist local
+  // Shift data (DB-backed)
+  const [capabilityByMhe, setCapabilityByMhe] = useState({});
+  const [taskInputsById, setTaskInputsById] = useState({});
+
+  // Persist local config
   useEffect(() => saveJson(LS_CFG_MHE, cfgMhe), [cfgMhe]);
   useEffect(() => saveJson(LS_CFG_TASKS, cfgTasks), [cfgTasks]);
-  useEffect(() => saveJson(LS_DATA, dataStore), [dataStore]);
+  useEffect(() => saveJson(LS_CFG_INDIRECT_LIMIT, indirectLimitPct), [indirectLimitPct]);
 
   const resolveAccountId = useCallback(async (userId) => {
     // Primary: public.users
@@ -192,7 +200,7 @@ export default function SchedulingTool() {
     })();
   }, [navigate, accountId, resolveAccountId]);
 
-  // Load tenant companies + memberships to enforce allowedCompanies
+  // Load tenant companies + memberships
   useEffect(() => {
     (async () => {
       try {
@@ -220,8 +228,7 @@ export default function SchedulingTool() {
 
         const memberCompanyIds = new Set((cuRows || []).map((r) => r.company_id).filter(Boolean));
 
-        // FIX: Do NOT hard-fail if this login has no company_users rows.
-        // Fall back to all tenant companies (same behaviour as Colleagues/MHE fix).
+        // Do NOT hard-fail if no memberships. Fall back to all tenant companies.
         let allowed = [];
         if (memberCompanyIds.size === 0) {
           allowed = compRows || [];
@@ -247,8 +254,6 @@ export default function SchedulingTool() {
         }
 
         setAllowedCompanies(allowed);
-
-        // Keep selection if still valid, else default to first allowed
         setCompanyId((prev) => (prev && allowed.some((x) => x.id === prev) ? prev : (allowed[0]?.id || "")));
       } catch (e) {
         setStatus({ text: e?.message || "Failed to load companies.", isError: true });
@@ -276,23 +281,12 @@ export default function SchedulingTool() {
 
         const list = data || [];
         setSites(list);
-
-        // Auto-select first site if exists
         setSiteId((prev) => (prev && list.some((s) => s.id === prev) ? prev : (list[0]?.id || "")));
       } catch (e) {
         setStatus({ text: e?.message || "Failed to load sites.", isError: true });
       }
     })();
   }, [accountId, companyId]);
-
-  // Derived context store
-  const ctx = useMemo(() => {
-    const d = dataStore?.[date] || {};
-    const s = d?.[shift] || {};
-    return s;
-  }, [dataStore, date, shift]);
-
-  const availableByMhe = useMemo(() => ctx.__availableByMhe || {}, [ctx]);
 
   const mheTypes = useMemo(() => {
     const types = (cfgMhe || []).map((r) => (r.type || "").trim()).filter(Boolean);
@@ -303,11 +297,11 @@ export default function SchedulingTool() {
   const volumesByTaskId = useMemo(() => {
     const m = {};
     for (const t of cfgTasks) {
-      const row = ctx?.[t.id] || {};
+      const row = taskInputsById?.[t.id] || {};
       m[t.id] = { planVolume: row.planVolume ?? "", actualVolume: row.actualVolume ?? "" };
     }
     return m;
-  }, [cfgTasks, ctx]);
+  }, [cfgTasks, taskInputsById]);
 
   const calcByTaskId = useMemo(() => {
     const out = {};
@@ -349,36 +343,110 @@ export default function SchedulingTool() {
     }
 
     let totalAvail = 0;
-    for (const mt of mheTypes) totalAvail += safeNum(availableByMhe?.[mt]);
+    for (const mt of mheTypes) totalAvail += safeNum(capabilityByMhe?.[mt]?.hoursAvailable);
 
     const totalPlan = planDirect + planIndirect;
     const totalActual = actDirect + actIndirect;
 
-    return { byMhe, planDirect, planIndirect, actDirect, actIndirect, totalAvail, totalPlan, totalActual };
-  }, [cfgTasks, calcByTaskId, mheTypes, availableByMhe]);
+    const costRateByMhe = {};
+    for (const r of cfgMhe || []) {
+      const k = (r.type || "").trim();
+      if (!k) continue;
+      costRateByMhe[k] = safeNum(r.costPerHour);
+    }
 
-  // Mutators
-  const setAvail = (mheType, value) => {
-    setDataStore((prev) => {
-      const next = structuredClone(prev || {});
-      next[date] = next[date] || {};
-      next[date][shift] = next[date][shift] || {};
-      const s = next[date][shift];
-      s.__availableByMhe = { ...(s.__availableByMhe || {}) };
-      s.__availableByMhe[mheType] = value;
-      return next;
-    });
+    const planCost = Object.entries(byMhe).reduce((sum, [mhe, v]) => sum + safeNum(v.plan) * safeNum(costRateByMhe[mhe]), 0);
+    const actualCost = Object.entries(byMhe).reduce((sum, [mhe, v]) => sum + safeNum(v.actual) * safeNum(costRateByMhe[mhe]), 0);
+    const expectedCost = planCost; // default
+
+    const indirectPctOfPlan = totalPlan > 0 ? (planIndirect / totalPlan) * 100 : 0;
+
+    return {
+      byMhe,
+      planDirect,
+      planIndirect,
+      actDirect,
+      actIndirect,
+      totalAvail,
+      totalPlan,
+      totalActual,
+      planCost,
+      expectedCost,
+      actualCost,
+      indirectPctOfPlan,
+    };
+  }, [cfgTasks, calcByTaskId, mheTypes, capabilityByMhe, cfgMhe]);
+
+  // Mutators (DB-backed state)
+  const setCapability = (mheType, patch) => {
+    setCapabilityByMhe((prev) => ({
+      ...(prev || {}),
+      [mheType]: { ...(prev?.[mheType] || {}), ...patch },
+    }));
   };
 
   const setTask = (taskId, patch) => {
-    setDataStore((prev) => {
-      const next = structuredClone(prev || {});
-      next[date] = next[date] || {};
-      next[date][shift] = next[date][shift] || {};
-      next[date][shift][taskId] = { ...(next[date][shift][taskId] || {}), ...patch };
-      return next;
-    });
+    setTaskInputsById((prev) => ({
+      ...(prev || {}),
+      [taskId]: { ...(prev?.[taskId] || {}), ...patch },
+    }));
   };
+
+  const loadShiftFromDb = useCallback(async () => {
+    try {
+      if (!accountId) return;
+      if (!siteId) return;
+
+      // reset so blank sites/users do not show ghost values
+      setCapabilityByMhe({});
+      setTaskInputsById({});
+
+      const { data, error } = await supabase
+        .from("scheduling_entries")
+        .select(
+          "shift_code, mhe_id, task_name, headcount_plan, headcount_expected, headcount_actual, units_planned, units_actual, hours_direct_plan, hours_direct_expected, hours_direct_actual, hours_indirect_plan, hours_indirect_expected, hours_indirect_actual, cost_plan, cost_expected, cost_actual"
+        )
+        .eq("account_id", accountId)
+        .eq("site_id", siteId)
+        .eq("scheduled_date", date)
+        .eq("shift_code", shift);
+
+      if (error) throw error;
+
+      const cap = {};
+      const tasks = {};
+
+      for (const r of data || []) {
+        const mhe = (r.mhe_id || "").trim();
+        const tn = (r.task_name || "").trim();
+
+        if (tn === "__capability__" && mhe) {
+          cap[mhe] = {
+            headcountPlan: r.headcount_plan ?? "",
+            headcountExpected: r.headcount_expected ?? "",
+            headcountActual: r.headcount_actual ?? "",
+            hoursAvailable: r.hours_direct_expected ?? "",
+          };
+          continue;
+        }
+
+        // Match DB rows to configured tasks by name (authoritative until task_id is introduced)
+        const match = (cfgTasks || []).find((t) => (t.name || "").trim() === tn);
+        if (!match) continue;
+
+        tasks[match.id] = {
+          planVolume: r.units_planned ?? "",
+          actualVolume: r.units_actual ?? "",
+        };
+      }
+
+      setCapabilityByMhe(cap);
+      setTaskInputsById(tasks);
+      setStatus({ text: "Loaded shift data from database.", isError: false });
+    } catch (e) {
+      setStatus({ text: e?.message || "Failed to load shift data from database.", isError: true });
+    }
+  }, [accountId, siteId, date, shift, cfgTasks]);
 
   const saveToDb = useCallback(async () => {
     if (!accountId) return setStatus({ text: "No account_id resolved for this session.", isError: true });
@@ -389,12 +457,27 @@ export default function SchedulingTool() {
 
     // Capability rows
     for (const mt of mheTypes) {
-      const avail = safeNum(availableByMhe?.[mt]);
+      const cap = capabilityByMhe?.[mt] || {};
+      const headcountPlan = cap.headcountPlan === "" ? null : safeNum(cap.headcountPlan);
+      const headcountExpected = cap.headcountExpected === "" ? null : safeNum(cap.headcountExpected);
+      const headcountActual = cap.headcountActual === "" ? null : safeNum(cap.headcountActual);
+      const hoursAvail = cap.hoursAvailable === "" ? null : safeNum(cap.hoursAvailable);
+
       const planned = safeNum(summary.byMhe?.[mt]?.plan);
       const actual = safeNum(summary.byMhe?.[mt]?.actual);
 
-      if (avail === 0 && planned === 0 && actual === 0) continue;
+      const hasAny =
+        (headcountPlan ?? 0) !== 0 ||
+        (headcountExpected ?? 0) !== 0 ||
+        (headcountActual ?? 0) !== 0 ||
+        (hoursAvail ?? 0) !== 0 ||
+        planned !== 0 ||
+        actual !== 0;
 
+      if (!hasAny) continue;
+
+      // NOTE: scheduling_entries has no hours_available column.
+      // We persist availability into hours_direct_expected on a special row.
       rows.push({
         account_id: accountId,
         site_id: siteId,
@@ -402,9 +485,18 @@ export default function SchedulingTool() {
         shift_code: shift,
         mhe_id: mt,
         task_name: "__capability__",
-        headcount_expected: avail,
+        headcount_plan: headcountPlan,
+        headcount_expected: headcountExpected,
+        headcount_actual: headcountActual,
         hours_direct_plan: planned,
+        hours_direct_expected: hoursAvail,
         hours_direct_actual: actual,
+        hours_indirect_plan: 0,
+        hours_indirect_expected: 0,
+        hours_indirect_actual: 0,
+        cost_plan: null,
+        cost_expected: null,
+        cost_actual: null,
       });
     }
 
@@ -437,9 +529,35 @@ export default function SchedulingTool() {
         units_actual: Number.isFinite(av) ? av : null,
         hours_direct_plan: isIndirect ? 0 : ph,
         hours_indirect_plan: isIndirect ? ph : 0,
+        hours_direct_expected: isIndirect ? 0 : ph,
+        hours_indirect_expected: isIndirect ? ph : 0,
         hours_direct_actual: isIndirect ? 0 : ah,
         hours_indirect_actual: isIndirect ? ah : 0,
+        cost_plan: null,
+        cost_expected: null,
+        cost_actual: null,
       });
+    }
+
+    // Apply labour cost rates (plan/expected/actual) per row.
+    // Costs are stored for audit/reporting, but derived from hours × configured rate.
+    const costRateByMhe = {};
+    for (const r of cfgMhe || []) {
+      const k = (r.type || "").trim();
+      if (!k) continue;
+      costRateByMhe[k] = safeNum(r.costPerHour);
+    }
+
+    for (const r of rows) {
+      if (r.task_name === "__capability__") continue;
+      const mhe = (r.mhe_id || "").trim();
+      const rate = safeNum(costRateByMhe[mhe]);
+      const planH = safeNum(r.hours_direct_plan) + safeNum(r.hours_indirect_plan);
+      const expH = safeNum(r.hours_direct_expected) + safeNum(r.hours_indirect_expected);
+      const actH = safeNum(r.hours_direct_actual) + safeNum(r.hours_indirect_actual);
+      r.cost_plan = rate ? planH * rate : null;
+      r.cost_expected = rate ? expH * rate : null;
+      r.cost_actual = rate ? actH * rate : null;
     }
 
     if (rows.length === 0) return setStatus({ text: "Nothing to save for this date/shift.", isError: true });
@@ -452,13 +570,14 @@ export default function SchedulingTool() {
     accountId,
     companyId,
     siteId,
-    availableByMhe,
+    capabilityByMhe,
     calcByTaskId,
     cfgTasks,
+    cfgMhe,
     date,
     mheTypes,
     shift,
-    summary.byMhe,
+    summary,
     volumesByTaskId,
   ]);
 
@@ -470,7 +589,7 @@ export default function SchedulingTool() {
 
     const { data, error } = await supabase
       .from("scheduling_entries")
-      .select("shift_code, task_name, hours_direct_plan, hours_indirect_plan, hours_direct_actual, hours_indirect_actual")
+      .select("shift_code, task_name, hours_direct_plan, hours_indirect_plan, hours_direct_expected, hours_indirect_expected, hours_direct_actual, hours_indirect_actual, cost_plan, cost_expected, cost_actual")
       .eq("account_id", accountId)
       .eq("site_id", siteId)
       .eq("scheduled_date", date);
@@ -479,17 +598,22 @@ export default function SchedulingTool() {
 
     const shifts = ["AM", "PM", "Nights"];
     const map = {};
-    for (const s of shifts) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0 };
+    for (const s of shifts) map[s] = { shift: s, pd: 0, pi: 0, pe: 0, ie: 0, ad: 0, ai: 0, cp: 0, ce: 0, ca: 0 };
 
     for (const r of data || []) {
       const s = (r.shift_code || "AM").trim();
-      if (!map[s]) map[s] = { shift: s, pd: 0, pi: 0, ad: 0, ai: 0 };
+      if (!map[s]) map[s] = { shift: s, pd: 0, pi: 0, pe: 0, ie: 0, ad: 0, ai: 0, cp: 0, ce: 0, ca: 0 };
       if ((r.task_name || "").startsWith("__")) continue;
 
       map[s].pd += safeNum(r.hours_direct_plan);
       map[s].pi += safeNum(r.hours_indirect_plan);
+      map[s].pe += safeNum(r.hours_direct_expected);
+      map[s].ie += safeNum(r.hours_indirect_expected);
       map[s].ad += safeNum(r.hours_direct_actual);
       map[s].ai += safeNum(r.hours_indirect_actual);
+      map[s].cp += safeNum(r.cost_plan);
+      map[s].ce += safeNum(r.cost_expected);
+      map[s].ca += safeNum(r.cost_actual);
     }
 
     setDailyRows(shifts.map((s) => map[s]));
@@ -504,6 +628,12 @@ export default function SchedulingTool() {
     if (tab === "daily" && was !== "daily") refreshDaily();
   }, [tab, refreshDaily]);
 
+  // Auto-load shift data when context changes (DB is source of truth)
+  useEffect(() => {
+    if (!accountId || !siteId || !date || !shift) return;
+    loadShiftFromDb();
+  }, [accountId, siteId, date, shift, loadShiftFromDb]);
+
   return (
     <AppLayout activeNav={activeNav} onSelectNav={onSelectNav} headerEmail={email}>
       <Card
@@ -511,6 +641,9 @@ export default function SchedulingTool() {
         subtitle="Plan capability, enter volumes, compare plan vs actual, and save shift outputs."
         actions={
           <div className="wi-sched-actions">
+            <Button variant="secondary" onClick={loadShiftFromDb}>
+              Load from database
+            </Button>
             <Button variant="primary" onClick={saveToDb}>
               Save to database
             </Button>
@@ -581,12 +714,13 @@ export default function SchedulingTool() {
         {tab === "capability" && (
           <div className="wi-sched-section">
             <h3 className="wi-sched-h3">Capability</h3>
-            <div className="wi-sched-muted">Enter hours available per MHE type. Planned hours are calculated from planned volumes.</div>
+            <div className="wi-sched-muted">Enter headcount and hours available per MHE/resource type. Planned hours are calculated from planned volumes.</div>
 
             <div className="wi-sched-kpis">
               <div className="wi-sched-kpi">
                 <div className="wi-sched-kpiK">Hours available</div>
                 <div className="wi-sched-kpiV">{summary.totalAvail.toFixed(2)}h</div>
+                <div className="wi-sched-muted">From capability entries (hours available)</div>
               </div>
               <div className="wi-sched-kpi">
                 <div className="wi-sched-kpiK">Hours planned</div>
@@ -596,6 +730,27 @@ export default function SchedulingTool() {
                 <div className="wi-sched-kpiK">Variance (avail − plan)</div>
                 <div className="wi-sched-kpiV">{(summary.totalAvail - summary.totalPlan).toFixed(2)}h</div>
               </div>
+              <div className={summary.indirectPctOfPlan > indirectLimitPct ? "wi-sched-kpi wi-sched-kpi--warning" : "wi-sched-kpi"}>
+                <div className="wi-sched-kpiK">Indirect hours</div>
+                <div className="wi-sched-kpiV">{summary.planIndirect.toFixed(2)}h</div>
+                <div className="wi-sched-muted">
+                  {summary.indirectPctOfPlan.toFixed(1)}% of planned hours — Limit
+                  <input
+                    className="wi-sched-inlineInput"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={indirectLimitPct}
+                    onChange={(e) => setIndirectLimitPct(Number(e.target.value))}
+                  />
+                  %
+                </div>
+              </div>
+              <div className="wi-sched-kpi">
+                <div className="wi-sched-kpiK">Labour cost</div>
+                <div className="wi-sched-kpiV">£{summary.planCost.toFixed(2)} / £{summary.actualCost.toFixed(2)}</div>
+                <div className="wi-sched-muted">Plan / Actual (hours × configured rate)</div>
+              </div>
             </div>
 
             <div className="wi-sched-tableWrap">
@@ -603,6 +758,9 @@ export default function SchedulingTool() {
                 <thead>
                   <tr>
                     <th>MHE Type</th>
+                    <th className="num">Headcount plan</th>
+                    <th className="num">Headcount expected</th>
+                    <th className="num">Headcount actual</th>
                     <th className="num">Hours available</th>
                     <th className="num">Hours planned</th>
                     <th className="num">Variance</th>
@@ -610,7 +768,11 @@ export default function SchedulingTool() {
                 </thead>
                 <tbody>
                   {mheTypes.map((mt) => {
-                    const avail = safeNum(availableByMhe?.[mt]);
+                    const cap = capabilityByMhe?.[mt] || {};
+                    const hcPlan = cap.headcountPlan ?? "";
+                    const hcExp = cap.headcountExpected ?? "";
+                    const hcAct = cap.headcountActual ?? "";
+                    const avail = safeNum(cap.hoursAvailable);
                     const planned = safeNum(summary.byMhe?.[mt]?.plan);
                     const variance = avail - planned;
                     return (
@@ -621,9 +783,39 @@ export default function SchedulingTool() {
                             className="wi-sched-cellInput"
                             type="number"
                             min="0"
+                            step="1"
+                            value={hcPlan}
+                            onChange={(e) => setCapability(mt, { headcountPlan: e.target.value === "" ? "" : Number(e.target.value) })}
+                          />
+                        </td>
+                        <td className="num">
+                          <input
+                            className="wi-sched-cellInput"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={hcExp}
+                            onChange={(e) => setCapability(mt, { headcountExpected: e.target.value === "" ? "" : Number(e.target.value) })}
+                          />
+                        </td>
+                        <td className="num">
+                          <input
+                            className="wi-sched-cellInput"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={hcAct}
+                            onChange={(e) => setCapability(mt, { headcountActual: e.target.value === "" ? "" : Number(e.target.value) })}
+                          />
+                        </td>
+                        <td className="num">
+                          <input
+                            className="wi-sched-cellInput"
+                            type="number"
+                            min="0"
                             step="0.25"
-                            value={availableByMhe?.[mt] ?? ""}
-                            onChange={(e) => setAvail(mt, e.target.value === "" ? "" : Number(e.target.value))}
+                            value={cap.hoursAvailable ?? ""}
+                            onChange={(e) => setCapability(mt, { hoursAvailable: e.target.value === "" ? "" : Number(e.target.value) })}
                           />
                         </td>
                         <td className="num">{planned.toFixed(2)}</td>
@@ -731,11 +923,15 @@ export default function SchedulingTool() {
         {tab === "config" && (
           <div className="wi-sched-section">
             <h3 className="wi-sched-h3">Configuration</h3>
-            <div className="wi-sched-muted">Minimal configuration view (aligned to Users/Password styling).</div>
+            <div className="wi-sched-muted">
+              Configuration is used to drive planning calculations and stored labour cost values. MHE/resource rates are used as <strong>£/hour</strong> multipliers
+              (hours × rate). Tasks are matched to database rows by <strong>Task name</strong>.
+            </div>
 
             <div className="wi-sched-configGrid">
               <div>
-                <h4 className="wi-sched-h4">Resources</h4>
+                <h4 className="wi-sched-h4">Resources and labour rates</h4>
+                <div className="wi-sched-muted">Define the MHE key and the fully-loaded labour rate for that resource type.</div>
                 {(cfgMhe || []).map((r, idx) => (
                   <div key={r.id} className="wi-sched-row">
                     <input
@@ -762,27 +958,28 @@ export default function SchedulingTool() {
                       className="wi-sched-control"
                       type="number"
                       min="0"
-                      step="1"
-                      value={safeNum(r.count)}
+                      step="0.5"
+                      value={r.costPerHour ?? ""}
                       onChange={(e) => {
                         const next = [...cfgMhe];
-                        next[idx] = { ...next[idx], count: Number(e.target.value) };
+                        next[idx] = { ...next[idx], costPerHour: e.target.value === "" ? "" : Number(e.target.value) };
                         setCfgMhe(next);
                       }}
-                      placeholder="Count"
+                      placeholder="Cost £/hr"
                     />
                   </div>
                 ))}
 
                 <div className="wi-sched-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
-                  <Button variant="primary" onClick={() => setCfgMhe((prev) => [...prev, { id: uid(), label: "New resource", type: "", count: 0 }])}>
+                  <Button variant="primary" onClick={() => setCfgMhe((prev) => [...prev, { id: uid(), label: "New resource", type: "", costPerHour: "" }])}>
                     Add resource
                   </Button>
                 </div>
               </div>
 
               <div>
-                <h4 className="wi-sched-h4">Tasks</h4>
+                <h4 className="wi-sched-h4">Tasks and productivity standards</h4>
+                <div className="wi-sched-muted">Minutes per unit are used to derive planned/actual hours. Category controls Direct vs Indirect hour allocation.</div>
                 {(cfgTasks || []).map((t, idx) => (
                   <div key={t.id} className="wi-sched-row">
                     <input
@@ -804,6 +1001,38 @@ export default function SchedulingTool() {
                         setCfgTasks(next);
                       }}
                       placeholder="MHE type"
+                    />
+                    <select
+                      className="wi-sched-control"
+                      value={t.category || "Direct"}
+                      onChange={(e) => {
+                        const next = [...cfgTasks];
+                        next[idx] = { ...next[idx], category: e.target.value };
+                        setCfgTasks(next);
+                      }}
+                    >
+                      <option value="Direct">Direct</option>
+                      <option value="Indirect">Indirect</option>
+                    </select>
+                    <input
+                      className="wi-sched-control"
+                      value={t.area || ""}
+                      onChange={(e) => {
+                        const next = [...cfgTasks];
+                        next[idx] = { ...next[idx], area: e.target.value };
+                        setCfgTasks(next);
+                      }}
+                      placeholder="Area"
+                    />
+                    <input
+                      className="wi-sched-control"
+                      value={t.unit || ""}
+                      onChange={(e) => {
+                        const next = [...cfgTasks];
+                        next[idx] = { ...next[idx], unit: e.target.value };
+                        setCfgTasks(next);
+                      }}
+                      placeholder="Unit (e.g. Pallets)"
                     />
                     <input
                       className="wi-sched-control"
@@ -855,8 +1084,13 @@ export default function SchedulingTool() {
                     <th>Shift</th>
                     <th className="num">Planned direct (h)</th>
                     <th className="num">Planned indirect (h)</th>
+                    <th className="num">Expected direct (h)</th>
+                    <th className="num">Expected indirect (h)</th>
                     <th className="num">Actual direct (h)</th>
                     <th className="num">Actual indirect (h)</th>
+                    <th className="num">Cost plan (£)</th>
+                    <th className="num">Cost expected (£)</th>
+                    <th className="num">Cost actual (£)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -865,13 +1099,18 @@ export default function SchedulingTool() {
                       <td>{r.shift}</td>
                       <td className="num">{safeNum(r.pd).toFixed(2)}</td>
                       <td className="num">{safeNum(r.pi).toFixed(2)}</td>
+                      <td className="num">{safeNum(r.pe).toFixed(2)}</td>
+                      <td className="num">{safeNum(r.ie).toFixed(2)}</td>
                       <td className="num">{safeNum(r.ad).toFixed(2)}</td>
                       <td className="num">{safeNum(r.ai).toFixed(2)}</td>
+                      <td className="num">£{safeNum(r.cp).toFixed(2)}</td>
+                      <td className="num">£{safeNum(r.ce).toFixed(2)}</td>
+                      <td className="num">£{safeNum(r.ca).toFixed(2)}</td>
                     </tr>
                   ))}
                   {(!dailyRows || dailyRows.length === 0) && (
                     <tr>
-                      <td colSpan={5} className="wi-sched-muted" style={{ padding: 10 }}>
+                      <td colSpan={10} className="wi-sched-muted" style={{ padding: 10 }}>
                         No daily rows returned (select site/date then refresh).
                       </td>
                     </tr>
