@@ -1,5 +1,5 @@
 // /src/pages/Login.jsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import "./login.css";
@@ -36,7 +36,24 @@ export function Login() {
   const nav = useNavigate();
   const loc = useLocation();
 
-  const [tab, setTab] = useState("signin");
+  // Allow deep-linking:
+  // /login -> Sign in
+  // /login?tab=create OR /login?tab=signup -> Create account
+  const getInitialTab = () => {
+    const sp = new URLSearchParams(loc.search || "");
+    const t = (sp.get("tab") || "").toLowerCase();
+    if (t === "create" || t === "signup" || t === "sign-up") return "create";
+    return "signin";
+  };
+
+  const [tab, setTab] = useState(getInitialTab);
+
+  useEffect(() => {
+    // If the query string changes, keep the UI in sync.
+    // This does NOT remove any functionality; it only enables the deep-link behaviour.
+    setTab(getInitialTab());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.search]);
 
   // Sign in
   const [signinEmail, setSigninEmail] = useState("");
@@ -52,8 +69,6 @@ export function Login() {
   const goToHome = () => {
     window.location.href = "https://www.warehouseintelligence.co.uk/";
   };
-
-
 
   // Busy states
   const [busySignIn, setBusySignIn] = useState(false);
