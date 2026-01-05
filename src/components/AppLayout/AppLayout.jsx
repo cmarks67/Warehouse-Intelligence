@@ -7,6 +7,9 @@ import "./AppLayout.css";
 import { SideNav } from "../SideNav/SideNav";
 import { TopBar } from "../TopBar/TopBar";
 
+// NEW
+import { SiteMapFooter } from "../SiteMapFooter/SiteMapFooter";
+
 // IMPORTANT: use the SAME singleton client used by DashboardPage.jsx
 import supabase from "../../lib/supabaseClient";
 
@@ -202,6 +205,9 @@ export function AppLayout({ activeNav, onSelectNav, headerEmail, children }) {
           <section className="wi-content">{children}</section>
         </div>
       </main>
+
+      {/* NEW: footer sitemap on all authenticated pages */}
+      <SiteMapFooter />
     </div>
   );
 }

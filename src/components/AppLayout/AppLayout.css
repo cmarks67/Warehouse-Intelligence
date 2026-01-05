@@ -149,3 +149,14 @@
     pointer-events: auto;
   }
 }
+/* === Sitemap footer support=== */
+
+.wi-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.wi-main {
+  flex: 1 0 auto;
+}
+

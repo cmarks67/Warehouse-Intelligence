@@ -3,6 +3,9 @@ import "./sidenav.css";
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+// NEW
+import { APP_NAV } from "../../lib/appNav";
+
 /* ---------- localStorage keys ---------- */
 const LS_NAV_COLLAPSED = "wi_nav_collapsed_v1";
 const LS_NAV_PINNED = "wi_nav_pinned_v1";
@@ -57,7 +60,7 @@ const Icons = {
       <path d="M3 10h6V3H3v7Zm8 7h6V3h-6v14ZM3 17h6v-5H3v5Z" fill="currentColor" />
     </Svg>
   ),
-  company: (
+  "company-site-setup": (
     <Svg>
       <path
         d="M3 17V4.5C3 3.7 3.7 3 4.5 3H12c.8 0 1.5.7 1.5 1.5V7h2c.8 0 1.5.7 1.5 1.5V17H3Zm2-2h2v-2H5v2Zm0-4h2V9H5v2Zm0-4h2V5H5v2Zm4 8h2v-2H9v2Zm0-4h2V9H9v2Zm0-4h2V5H9v2Zm4 8h2v-2h-2v2Zm0-4h2V9h-2v2Z"
@@ -65,7 +68,7 @@ const Icons = {
       />
     </Svg>
   ),
-  colleagues: (
+  "colleagues-setup": (
     <Svg>
       <path
         d="M7 10a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm6 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5ZM2.8 17c.4-2.7 2.6-4.5 5.2-4.5s4.8 1.8 5.2 4.5H2.8Zm11.5 0c-.2-1.8-1.3-3.2-2.8-3.9.5-.3 1.1-.6 1.8-.6 2 0 3.5 1.3 3.7 4.5h-2.7Z"
@@ -73,7 +76,7 @@ const Icons = {
       />
     </Svg>
   ),
-  mhe: (
+  "mhe-setup": (
     <Svg>
       <path d="M6 3h8v3h2v4h-2v7H6v-7H4V6h2V3Zm2 3h4V5H8v1Zm0 9h4v-3H8v3Z" fill="currentColor" />
     </Svg>
@@ -86,7 +89,7 @@ const Icons = {
       />
     </Svg>
   ),
-  scheduling: (
+  "scheduling-tool": (
     <Svg>
       <path
         d="M6 2v2H4.5C3.7 4 3 4.7 3 5.5V16.5C3 17.3 3.7 18 4.5 18H15.5c.8 0 1.5-.7 1.5-1.5V5.5C17 4.7 16.3 4 15.5 4H14V2h-2v2H8V2H6Zm9 6H5V6h10v2Zm-6 8H5v-2h4v2Zm6 0h-4v-2h4v2Zm0-4H5v-2h10v2Z"
@@ -94,7 +97,7 @@ const Icons = {
       />
     </Svg>
   ),
-  training: (
+  "mhe-training": (
     <Svg>
       <path d="M4 4h12v12H4V4Zm2 2v8h8V6H6Zm9 1h1v7h-1V7Z" fill="currentColor" />
     </Svg>
@@ -150,63 +153,8 @@ function DropdownHeader({ title, open, onToggle, collapsed }) {
   );
 }
 
-const NAV = {
-  navigation: [
-    { key: "overview", label: "Overview", icon: Icons.overview, to: "/app/dashboard", paths: ["/app", "/app/dashboard", "/app/overview"] },
-  ],
-  setup: [
-    {
-      key: "company-site-setup",
-      label: "Company & site setup",
-      icon: Icons.company,
-      to: "/app/setup/companies-sites",
-      paths: ["/app/setup/companies-sites", "/app/companies-sites"],
-    },
-    {
-      key: "colleagues-setup",
-      label: "Colleagues",
-      icon: Icons.colleagues,
-      to: "/app/setup/colleagues",
-      paths: ["/app/setup/colleagues", "/app/colleagues"],
-    },
-    {
-      key: "mhe-setup",
-      label: "MHE setup",
-      icon: Icons.mhe,
-      to: "/app/setup/mhe",
-      // include likely variants + nested routes
-      paths: ["/app/setup/mhe", "/app/mhe", "/app/setup/mhe-setup", "/app/setup/mhe-setup/"],
-    },
-    {
-      key: "connections",
-      label: "Data Connections",
-      icon: Icons.connections,
-      to: "/app/connections",
-      paths: ["/app/connections", "/app/data-connections", "/app/setup/connections"],
-    },
-  ],
-  tools: [
-    {
-      key: "scheduling-tool",
-      label: "Scheduling tool",
-      icon: Icons.scheduling,
-      to: "/app/tools/scheduling",
-      // include likely variants + nested routes
-      paths: ["/app/tools/scheduling", "/app/scheduling", "/app/tools/scheduling-tool", "/app/tools/scheduling/"],
-    },
-    {
-      key: "mhe-training",
-      label: "MHE training records",
-      icon: Icons.training,
-      to: "/app/setup/mhe-training",
-      paths: ["/app/setup/mhe-training", "/app/mhe-training", "/app/tools/mhe-training", "/app/setup/mhe-training/"],
-    },
-  ],
-  settings: [
-    { key: "users", label: "Users", icon: Icons.users, to: "/app/users", paths: ["/app/users"] },
-    { key: "password", label: "Password reset", icon: Icons.password, to: "/app/password", paths: ["/app/password"] },
-  ],
-};
+// NEW: shared nav
+const NAV = APP_NAV;
 
 function deriveActiveKey(pathname) {
   const path = (pathname || "").replace(/\/+$/, "") || "/";
@@ -266,6 +214,7 @@ function IconPin({ filled }) {
 
 function NavRow({ item, activeKey, collapsed, onClick }) {
   const isActive = item.key === activeKey;
+  const icon = Icons[item.key];
 
   return (
     <div
@@ -276,7 +225,11 @@ function NavRow({ item, activeKey, collapsed, onClick }) {
       title={collapsed ? item.label : undefined}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
     >
-      {collapsed ? <span className="wi-nav__icon">{item.icon}</span> : <span className="wi-nav__label">{item.label}</span>}
+      {collapsed ? (
+        <span className="wi-nav__icon">{icon || null}</span>
+      ) : (
+        <span className="wi-nav__label">{item.label}</span>
+      )}
     </div>
   );
 }
@@ -286,7 +239,15 @@ export function SideNav({ sectionsOpen, onToggleSection, onCollapsedChange }) {
   const location = useLocation();
 
   // init from storage so it survives page/app layout remounts
-  const [collapsed, setCollapsed] = useState(() => lsGetBool(LS_NAV_COLLAPSED, false));
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const raw = localStorage.getItem(LS_NAV_COLLAPSED);
+      if (raw === null || raw === undefined) return false;
+      return raw === "1";
+    } catch {
+      return false;
+    }
+  });
   const [pinnedOpen, setPinnedOpen] = useState(() => lsGetBool(LS_NAV_PINNED, false));
 
   // local section open state (only used if parent doesn't supply sectionsOpen)
